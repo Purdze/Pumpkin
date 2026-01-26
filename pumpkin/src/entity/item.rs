@@ -17,7 +17,7 @@ use pumpkin_util::math::vector3::Vector3;
 use pumpkin_world::item::ItemStack;
 use tokio::sync::Mutex;
 
-use crate::{entity::EntityBaseFuture, server::Server};
+use crate::{advancement, entity::EntityBaseFuture, server::Server};
 
 use super::{Entity, EntityBase, NBTStorage, living::LivingEntity, player::Player};
 
@@ -380,34 +380,42 @@ impl EntityBase for ItemEntity {
 
             if can_pickup
                 && player.living_entity.health.load() > 0.0
-                && (player
+            {
+                // Clone the item before pickup to check for advancement triggers
+                let item_for_advancement = self.item_stack.lock().await.clone();
+
+                if player
                     .inventory
                     .insert_stack_anywhere(&mut *self.item_stack.lock().await)
                     .await
-                    || player.is_creative())
-            {
-                player
-                    .client
-                    .enqueue_packet(&CTakeItemEntity::new(
-                        self.entity.entity_id.into(),
-                        player.entity_id().into(),
-                        self.item_stack.lock().await.item_count.into(),
-                    ))
-                    .await;
-                player
-                    .current_screen_handler
-                    .lock()
-                    .await
-                    .lock()
-                    .await
-                    .send_content_updates()
-                    .await;
+                    || player.is_creative()
+                {
+                    // Check advancement triggers for the picked up item
+                    advancement::trigger::on_inventory_changed(player, &item_for_advancement).await;
 
-                if self.item_stack.lock().await.is_empty() {
-                    self.entity.remove().await;
-                } else {
-                    // Update entity
-                    self.init_data_tracker().await;
+                    player
+                        .client
+                        .enqueue_packet(&CTakeItemEntity::new(
+                            self.entity.entity_id.into(),
+                            player.entity_id().into(),
+                            self.item_stack.lock().await.item_count.into(),
+                        ))
+                        .await;
+                    player
+                        .current_screen_handler
+                        .lock()
+                        .await
+                        .lock()
+                        .await
+                        .send_content_updates()
+                        .await;
+
+                    if self.item_stack.lock().await.is_empty() {
+                        self.entity.remove().await;
+                    } else {
+                        // Update entity
+                        self.init_data_tracker().await;
+                    }
                 }
             }
         })
