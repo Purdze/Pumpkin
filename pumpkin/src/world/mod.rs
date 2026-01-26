@@ -9,6 +9,7 @@ pub mod loot;
 pub mod portal;
 pub mod time;
 
+use crate::advancement;
 use crate::block::RandomTickArgs;
 use crate::world::loot::LootContextParameters;
 use crate::{block::BlockEvent, entity::item::ItemEntity};
@@ -1778,6 +1779,10 @@ impl World {
             .await;
 
         player.send_active_effects().await;
+
+        // Send advancements to the player
+        advancement::send_advancements(player).await;
+
         self.send_player_equipment(player).await;
     }
 

@@ -30,6 +30,7 @@ use tokio::time::sleep;
 use tokio_util::sync::CancellationToken;
 use tokio_util::task::TaskTracker;
 
+pub mod advancement;
 pub mod block;
 pub mod command;
 pub mod data;
