@@ -414,6 +414,8 @@ impl PumpkinServer {
                                         client.close();
                                         client.await_tasks().await;
                                     }
+                                    // Save advancement progress before removing player
+                                    crate::advancement::save_advancements(&player).await;
                                     player.remove().await;
                                     server_clone.remove_player(&player).await;
                                     if let Err(e) = server_clone.player_data_storage

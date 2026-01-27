@@ -925,6 +925,24 @@ impl LivingEntity {
             self.drop_loot(params).await;
             self.entity.pose.store(EntityPose::Dying);
 
+            // Trigger player_killed_entity advancement criteria
+            if let Some(cause_entity) = cause {
+                if cause_entity.get_entity().entity_type == &EntityType::PLAYER {
+                    // Get the player who killed this entity
+                    if let Some(killer_player) = world
+                        .get_player_by_id(cause_entity.get_entity().entity_id)
+                        .await
+                    {
+                        let killed_entity_type = self.entity.entity_type.resource_name;
+                        crate::advancement::trigger::on_player_killed_entity(
+                            &killer_player,
+                            killed_entity_type,
+                        )
+                        .await;
+                    }
+                }
+            }
+
             let block_pos = self.entity.block_pos.load();
 
             for slot in self.equipment_slots.values() {
@@ -1275,6 +1293,11 @@ impl EntityBase for LivingEntity {
                             .hunger_manager
                             .eat(player, food.nutrition as u8, food.saturation)
                             .await;
+
+                        // Trigger consume_item advancement criteria
+                        if let Some(player_arc) = self.entity.world.get_player_by_id(self.entity.entity_id).await {
+                            crate::advancement::trigger::on_consume_item(&player_arc, item).await;
+                        }
                     }
                     if let Some(player) = caller.get_player() {
                         player

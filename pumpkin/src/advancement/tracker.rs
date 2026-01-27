@@ -9,13 +9,15 @@ use std::sync::RwLock;
 use pumpkin_protocol::codec::item_stack_seralizer::ItemStackSerializer;
 use pumpkin_protocol::java::client::play::{
     Advancement, AdvancementDisplay, AdvancementFrameType, AdvancementMapping,
-    AdvancementProgressMapping, CUpdateAdvancements,
+    AdvancementProgress, AdvancementProgressMapping, CUpdateAdvancements, CriterionProgress,
+    CriterionProgressMapping,
 };
 use pumpkin_util::resource_location::ResourceLocation;
 use pumpkin_util::text::TextComponent;
 use pumpkin_world::item::ItemStack;
+use uuid::Uuid;
 
-use super::{AdvancementData, AdvancementProgressData, AdvancementRegistry, flags, loader};
+use super::{storage, AdvancementData, AdvancementProgressData, AdvancementRegistry, flags};
 use crate::entity::player::Player;
 
 /// Tracks advancement progress for a single player.
@@ -121,6 +123,52 @@ impl PlayerAdvancementTracker {
         } else {
             false
         }
+    }
+
+    /// Loads progress from disk and merges with current progress.
+    ///
+    /// This should be called after creating the tracker to restore saved progress.
+    pub fn load_progress(&mut self, world_path: &Path, player_uuid: Uuid) {
+        let loaded = storage::load_progress(world_path, player_uuid);
+
+        // Merge loaded progress with initialized progress
+        for (id, loaded_progress) in loaded {
+            if let Some(current) = self.progress.get_mut(&id) {
+                // Merge criteria - keep structure but restore obtained times
+                for (criterion, time) in loaded_progress.criteria {
+                    if let Some(current_time) = current.criteria.get_mut(&criterion) {
+                        *current_time = time;
+                    }
+                }
+            }
+        }
+
+        log::debug!("Loaded advancement progress for {player_uuid}");
+    }
+
+    /// Saves progress to disk.
+    ///
+    /// This should be called periodically or when the player disconnects.
+    pub fn save_progress(&self, world_path: &Path, player_uuid: Uuid) {
+        // Build requirements map for checking completion
+        let requirements: HashMap<ResourceLocation, Vec<Vec<String>>> = {
+            let registry = self.registry.read().unwrap();
+            registry
+                .all()
+                .map(|adv| (adv.id.clone(), adv.requirements.clone()))
+                .collect()
+        };
+
+        if let Err(e) = storage::save_progress(world_path, player_uuid, &self.progress, &requirements)
+        {
+            log::error!("Failed to save advancement progress for {player_uuid}: {e}");
+        }
+    }
+
+    /// Checks if there are any pending changes that should be saved.
+    #[must_use]
+    pub fn has_unsaved_changes(&self) -> bool {
+        !self.pending_updates.is_empty()
     }
 
     /// Sends advancement updates to the player.
@@ -274,8 +322,49 @@ struct AdvancementProgressMappingOwned {
 
 /// Sends initial advancements to a player.
 /// This is the main entry point called when a player joins.
+///
+/// This function also loads the player's saved progress from disk and
+/// checks their current inventory for any advancement triggers.
 pub async fn send_advancements(player: &Arc<Player>) {
+    // Load saved progress from disk
+    let world_path = player
+        .living_entity
+        .entity
+        .world
+        .level
+        .level_folder
+        .root_folder
+        .clone();
+    let player_uuid = player.gameprofile.id;
+
+    {
+        let mut tracker = player.advancement_tracker.write().await;
+        tracker.load_progress(&world_path, player_uuid);
+    }
+
+    // Check current inventory for any advancement triggers
+    // This handles items the player had before disconnecting
+    super::trigger::check_inventory_for_advancements(player).await;
+
     send_loaded_advancements(player).await;
+}
+
+/// Saves the player's advancement progress to disk.
+///
+/// This should be called when the player disconnects or periodically.
+pub async fn save_advancements(player: &Arc<Player>) {
+    let world_path = player
+        .living_entity
+        .entity
+        .world
+        .level
+        .level_folder
+        .root_folder
+        .clone();
+    let player_uuid = player.gameprofile.id;
+
+    let tracker = player.advancement_tracker.read().await;
+    tracker.save_progress(&world_path, player_uuid);
 }
 
 /// Prepared data for a single advancement (owned, for lifetime management).
@@ -296,24 +385,29 @@ struct PreparedAdvancement {
     has_display: bool,
 }
 
-/// Sends advancements loaded from JSON files.
+/// Sends advancements to player using their tracker.
 #[expect(clippy::too_many_lines)]
 async fn send_loaded_advancements(player: &Arc<Player>) {
-    // Load advancements from data directory
-    let data_path = Path::new("pumpkin/src/data/minecraft");
-    let advancements_data = match loader::load_advancements_from_dir(data_path, "minecraft") {
-        Ok(data) => {
-            log::info!("Loaded {} advancements from JSON files", data.len());
-            data
-        }
-        Err(e) => {
-            log::warn!("Failed to load advancements: {e}, using empty set");
-            Vec::new()
-        }
+    // Collect all data from tracker before any awaits to avoid Send issues
+    let (advancements_data, progress_snapshot) = {
+        let tracker = player.advancement_tracker.read().await;
+        let registry = tracker.registry.read().unwrap();
+        let advancements: Vec<_> = registry.all().cloned().collect();
+        drop(registry);
+
+        // Snapshot progress for all advancements
+        let progress: HashMap<ResourceLocation, super::AdvancementProgressData> = advancements
+            .iter()
+            .filter_map(|adv| {
+                tracker.get_progress(&adv.id).cloned().map(|p| (adv.id.clone(), p))
+            })
+            .collect();
+
+        (advancements, progress)
     };
 
     if advancements_data.is_empty() {
-        log::warn!("No advancements loaded, skipping send");
+        log::warn!("No advancements in registry, skipping send");
         return;
     }
 
@@ -440,8 +534,51 @@ async fn send_loaded_advancements(player: &Arc<Player>) {
         })
         .collect();
 
-    // No progress to send initially (player hasn't earned any yet)
-    let progress: Vec<AdvancementProgressMapping> = Vec::new();
+    // Build progress mappings from progress_snapshot (collected earlier)
+    // Filter to only advancements that have any obtained criteria
+    let progress_data: Vec<(ResourceLocation, super::AdvancementProgressData)> = prepared
+        .iter()
+        .filter_map(|p| {
+            let prog = progress_snapshot.get(&p.id)?;
+            if prog.is_any_obtained() {
+                Some((p.id.clone(), prog.clone()))
+            } else {
+                None
+            }
+        })
+        .collect();
+
+    // Build criterion progress for each advancement with progress
+    let criterion_progress: Vec<Vec<CriterionProgressMapping>> = progress_data
+        .iter()
+        .map(|(_, prog): &(ResourceLocation, super::AdvancementProgressData)| {
+            prog.criteria
+                .iter()
+                .filter_map(|(name, time): (&String, &Option<i64>)| {
+                    time.map(|t| CriterionProgressMapping {
+                        criterion: name.as_str(),
+                        progress: CriterionProgress {
+                            obtained_time: Some(t),
+                        },
+                    })
+                })
+                .collect()
+        })
+        .collect();
+
+    // Build progress mappings - create AdvancementProgress inline to avoid clone
+    let progress: Vec<AdvancementProgressMapping> = progress_data
+        .iter()
+        .enumerate()
+        .map(|(i, (id, _)): (usize, &(ResourceLocation, super::AdvancementProgressData))| {
+            AdvancementProgressMapping {
+                id: id.clone(),
+                progress: AdvancementProgress {
+                    criteria: &criterion_progress[i],
+                },
+            }
+        })
+        .collect();
 
     let packet = CUpdateAdvancements::new(true, &advancements, &[], &progress, false);
     player.client.enqueue_packet(&packet).await;

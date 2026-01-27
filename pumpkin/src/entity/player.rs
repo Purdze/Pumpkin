@@ -363,6 +363,8 @@ pub struct Player {
     pub breath_manager: BreathManager,
     /// Manages the player's hunger level.
     pub hunger_manager: HungerManager,
+    /// Tracks advancement progress for this player.
+    pub advancement_tracker: Arc<tokio::sync::RwLock<crate::advancement::tracker::PlayerAdvancementTracker>>,
     /// The ID of the currently open container (if any).
     pub open_container: AtomicCell<Option<u64>>,
     /// The item currently being held by the player.
@@ -479,6 +481,11 @@ impl Player {
             breath_manager: BreathManager::default(),
             // TODO: Load this from previous instance
             hunger_manager: HungerManager::default(),
+            advancement_tracker: Arc::new(tokio::sync::RwLock::new(
+                crate::advancement::tracker::PlayerAdvancementTracker::new(
+                    server.advancement_registry.clone(),
+                ),
+            )),
             current_block_destroy_stage: AtomicI32::new(-1),
             open_container: AtomicCell::new(None),
             tick_counter: AtomicI32::new(0),
@@ -1771,6 +1778,11 @@ impl Player {
                 self.send_health().await;
 
                 new_world.send_world_info(&player, position, yaw, pitch).await;
+
+                // Trigger changed_dimension advancement criteria
+                let from_dimension = current_world.dimension.minecraft_name;
+                let to_dimension = new_world.dimension.minecraft_name;
+                crate::advancement::trigger::on_changed_dimension(self, from_dimension, to_dimension).await;
             }
         }}
     }
@@ -2530,7 +2542,7 @@ impl Player {
         }
     }
 
-    pub async fn on_slot_click(&self, packet: SClickSlot) {
+    pub async fn on_slot_click(self: &Arc<Self>, packet: SClickSlot) {
         self.update_last_action_time();
         let screen_handler = self.current_screen_handler.lock().await;
         let mut screen_handler = screen_handler.lock().await;
@@ -2546,7 +2558,7 @@ impl Player {
             return;
         }
 
-        if !screen_handler.can_use(self) {
+        if !screen_handler.can_use(self.as_ref()) {
             warn!(
                 "Player {} interacted with invalid menu {:?}",
                 self.gameprofile.name,
@@ -2575,7 +2587,7 @@ impl Player {
                 i32::from(slot),
                 i32::from(packet.button),
                 packet.mode.clone(),
-                self,
+                self.as_ref(),
             )
             .await;
 
@@ -2592,6 +2604,9 @@ impl Player {
             screen_handler.send_content_updates().await;
             drop(screen_handler);
         }
+
+        // Check for advancement triggers after inventory changes (e.g., crafting)
+        crate::advancement::trigger::check_inventory_for_advancements(self).await;
     }
 
     /// Check if the player has a specific permission

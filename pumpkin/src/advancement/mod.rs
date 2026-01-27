@@ -13,6 +13,7 @@
 pub mod criterion;
 pub mod loader;
 pub mod registry;
+pub mod storage;
 pub mod tracker;
 pub mod trigger;
 
@@ -25,7 +26,7 @@ use pumpkin_world::item::ItemStack;
 use serde::Deserialize;
 
 pub use registry::AdvancementRegistry;
-pub use tracker::{PlayerAdvancementTracker, send_advancements};
+pub use tracker::{PlayerAdvancementTracker, save_advancements, send_advancements};
 
 /// Gets the current timestamp in milliseconds since Unix epoch.
 #[must_use]

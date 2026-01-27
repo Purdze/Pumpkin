@@ -37,6 +37,18 @@ impl AdvancementRegistry {
         registry
     }
 
+    /// Loads advancements from embedded data (compiled into the binary).
+    /// This matches vanilla Minecraft where data is inside the JAR.
+    pub fn load_embedded(&mut self, namespace: &str) {
+        let advancements = loader::load_embedded_advancements(namespace);
+        for adv in advancements {
+            if adv.parent.is_none() && adv.display.is_some() {
+                self.roots.push(adv.id.clone());
+            }
+            self.advancements.insert(adv.id.clone(), Arc::new(adv));
+        }
+    }
+
     /// Loads advancements from a data directory.
     /// Expected path: `<base_path>/<namespace>/advancement/`
     pub fn load_from_dir(&mut self, base_path: &Path, namespace: &str) {

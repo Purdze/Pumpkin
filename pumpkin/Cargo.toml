@@ -88,6 +88,7 @@ rustc-hash.workspace = true
 tokio-util = { workspace = true, features = ["rt"] }
 
 flate2.workspace = true
+include_dir.workspace = true
 console-subscriber = { workspace = true, optional = true }
 signature.workspace = true
 [dev-dependencies]

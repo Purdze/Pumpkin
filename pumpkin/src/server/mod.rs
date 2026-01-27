@@ -1,3 +1,4 @@
+use crate::advancement::AdvancementRegistry;
 use crate::block::registry::BlockRegistry;
 use crate::command::commands::default_dispatcher;
 use crate::command::commands::defaultgamemode::DefaultGamemode;
@@ -103,6 +104,8 @@ pub struct Server {
     pub white_list: AtomicBool,
     /// Manages the server's tick rate, freezing, and sprinting
     pub tick_rate_manager: Arc<ServerTickRateManager>,
+    /// Global advancement registry (shared across all players).
+    pub advancement_registry: Arc<std::sync::RwLock<AdvancementRegistry>>,
     /// Stores the duration of the last 100 ticks for performance analysis
     pub tick_times_nanos: Mutex<[i64; 100]>,
     /// Aggregated tick times for efficient rolling average calculation
@@ -192,6 +195,15 @@ impl Server {
 
         let tick_rate_manager = Arc::new(ServerTickRateManager::new(basic_config.tps));
 
+        // Load advancements from embedded data (compiled into the binary, like vanilla JAR)
+        let mut advancement_registry = AdvancementRegistry::new();
+        advancement_registry.load_embedded("minecraft");
+
+        // Build the item criteria map for advancement triggers
+        crate::advancement::trigger::build_item_criteria_map(&advancement_registry);
+
+        let advancement_registry = Arc::new(std::sync::RwLock::new(advancement_registry));
+
         let mojang_keys_task = tokio::spawn({
             let auth_config = advanced_config.networking.authentication.clone();
             let allow_chat = basic_config.allow_chat_reports;
@@ -234,6 +246,7 @@ impl Server {
             player_data_storage,
             white_list,
             tick_rate_manager,
+            advancement_registry,
             tick_times_nanos: Mutex::new([0; 100]),
             aggregated_tick_times_nanos: AtomicI64::new(0),
             tick_count: AtomicI32::new(0),
