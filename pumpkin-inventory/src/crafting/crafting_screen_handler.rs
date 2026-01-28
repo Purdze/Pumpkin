@@ -234,9 +234,18 @@ async fn recipe_matches<'a>(
     }
 }
 
-impl ResultSlot {
-    //fn stat_crafted(&self, _crafted_amount: u8, _player: &dyn InventoryPlayer) {}
+/// Gets the recipe ID (result item ID) from a crafting recipe type.
+fn get_recipe_id(recipe: &CraftingRecipeTypes) -> Option<&'static str> {
+    match recipe {
+        CraftingRecipeTypes::CraftingShaped { result, .. } => Some(result.id),
+        CraftingRecipeTypes::CraftingShapeless { result, .. } => Some(result.id),
+        CraftingRecipeTypes::CraftingTransmute { result, .. } => Some(result.id),
+        CraftingRecipeTypes::CraftingDecoratedPot { .. } => Some("minecraft:decorated_pot"),
+        CraftingRecipeTypes::CraftingSpecial => None,
+    }
+}
 
+impl ResultSlot {
     pub fn new(inventory: Arc<dyn RecipeInputInventory>) -> Self {
         Self {
             inventory,
@@ -348,10 +357,16 @@ impl Slot for ResultSlot {
 
     fn on_take_item<'a>(
         &'a self,
-        _player: &'a dyn InventoryPlayer,
+        player: &'a dyn InventoryPlayer,
         _stack: &'a ItemStack,
     ) -> BoxFuture<'a, ()> {
         Box::pin(async move {
+            // Get the recipe ID before consuming ingredients
+            let recipe_id = self
+                .recipe_cache
+                .load()
+                .and_then(|recipe| get_recipe_id(recipe));
+
             for i in 0..self.inventory.size() {
                 let slot = self.inventory.get_stack(i).await;
                 let mut stack = slot.lock().await;
@@ -360,8 +375,12 @@ impl Slot for ResultSlot {
                     stack.item_count -= 1;
                 }
             }
-            // TODO
-            //self.stat_crafted(stack.item_count, player);
+
+            // Trigger recipe_crafted advancement
+            if let Some(recipe_id) = recipe_id {
+                player.on_recipe_crafted(recipe_id).await;
+            }
+
             self.mark_dirty().await;
         })
     }

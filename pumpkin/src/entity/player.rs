@@ -3368,4 +3368,13 @@ impl InventoryPlayer for Player {
             }
         })
     }
+
+    fn on_recipe_crafted<'a>(&'a self, recipe_id: &'a str) -> PlayerFuture<'a, ()> {
+        Box::pin(async move {
+            // Get Arc reference to self for the trigger
+            if let Some(player) = self.world().get_player_by_id(self.entity_id()).await {
+                crate::advancement::trigger::on_recipe_crafted(&player, recipe_id).await;
+            }
+        })
+    }
 }

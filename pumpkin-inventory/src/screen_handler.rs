@@ -94,6 +94,10 @@ pub trait InventoryPlayer: Send + Sync {
         slot: &'a EquipmentSlot,
         stack: &'a ItemStack,
     ) -> PlayerFuture<'a, ()>;
+
+    /// Called when the player crafts a recipe.
+    /// Used for advancement triggers.
+    fn on_recipe_crafted<'a>(&'a self, recipe_id: &'a str) -> PlayerFuture<'a, ()>;
 }
 
 pub async fn offer_or_drop_stack(player: &dyn InventoryPlayer, stack: ItemStack) {

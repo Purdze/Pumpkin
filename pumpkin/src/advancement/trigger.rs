@@ -59,6 +59,16 @@ static PLACED_BLOCK_CRITERIA_MAP: OnceLock<RwLock<HashMap<u16, Vec<(ResourceLoca
 static ENTER_BLOCK_CRITERIA_MAP: OnceLock<RwLock<HashMap<u16, Vec<(ResourceLocation, String)>>>> =
     OnceLock::new();
 
+/// Global mapping of recipe_id -> list of (advancement_id, criterion_name).
+/// For recipe_crafted triggers (player crafting).
+static RECIPE_CRAFTED_CRITERIA_MAP: OnceLock<RwLock<HashMap<String, Vec<(ResourceLocation, String)>>>> =
+    OnceLock::new();
+
+/// Global mapping of recipe_id -> list of (advancement_id, criterion_name).
+/// For crafter_recipe_crafted triggers (crafter block crafting).
+static CRAFTER_RECIPE_CRAFTED_CRITERIA_MAP: OnceLock<RwLock<HashMap<String, Vec<(ResourceLocation, String)>>>> =
+    OnceLock::new();
+
 /// Builds all criteria maps from the advancement registry.
 /// Should be called after advancements are loaded.
 pub fn build_criteria_maps(registry: &AdvancementRegistry) {
@@ -71,6 +81,8 @@ pub fn build_criteria_maps(registry: &AdvancementRegistry) {
     let mut location_biome_map: HashMap<String, Vec<(ResourceLocation, String)>> = HashMap::new();
     let mut placed_block_map: HashMap<u16, Vec<(ResourceLocation, String)>> = HashMap::new();
     let mut enter_block_map: HashMap<u16, Vec<(ResourceLocation, String)>> = HashMap::new();
+    let mut recipe_crafted_map: HashMap<String, Vec<(ResourceLocation, String)>> = HashMap::new();
+    let mut crafter_recipe_crafted_map: HashMap<String, Vec<(ResourceLocation, String)>> = HashMap::new();
 
     for advancement in registry.all() {
         for (criterion_name, criterion_data) in &advancement.criteria {
@@ -142,6 +154,18 @@ pub fn build_criteria_maps(registry: &AdvancementRegistry) {
                         enter_block_map.entry(block_id).or_default().push(entry.clone());
                     }
                 }
+                "minecraft:recipe_crafted" => {
+                    // Recipe crafted triggers check which recipe was crafted by the player
+                    if let Some(recipe_id) = conditions.get("recipe_id").and_then(|v| v.as_str()) {
+                        recipe_crafted_map.entry(recipe_id.to_string()).or_default().push(entry);
+                    }
+                }
+                "minecraft:crafter_recipe_crafted" => {
+                    // Crafter recipe crafted triggers check which recipe was crafted by a crafter block
+                    if let Some(recipe_id) = conditions.get("recipe_id").and_then(|v| v.as_str()) {
+                        crafter_recipe_crafted_map.entry(recipe_id.to_string()).or_default().push(entry);
+                    }
+                }
                 _ => {
                     // Other triggers not yet implemented
                 }
@@ -158,10 +182,12 @@ pub fn build_criteria_maps(registry: &AdvancementRegistry) {
     let location_count: usize = location_biome_map.values().map(|v| v.len()).sum();
     let placed_block_count: usize = placed_block_map.values().map(|v| v.len()).sum();
     let enter_block_count: usize = enter_block_map.values().map(|v| v.len()).sum();
+    let recipe_crafted_count: usize = recipe_crafted_map.values().map(|v| v.len()).sum();
+    let crafter_recipe_crafted_count: usize = crafter_recipe_crafted_map.values().map(|v| v.len()).sum();
 
     log::info!(
-        "Built advancement trigger maps: inventory_changed={}, changed_dimension={}, consume_item={}, player_killed_entity={}, recipe_unlocked={}, tick={}, location={}, placed_block={}, enter_block={}",
-        item_count, dim_count, consume_count, kill_count, recipe_count, tick_count, location_count, placed_block_count, enter_block_count
+        "Built advancement trigger maps: inventory_changed={}, changed_dimension={}, consume_item={}, player_killed_entity={}, recipe_unlocked={}, tick={}, location={}, placed_block={}, enter_block={}, recipe_crafted={}, crafter_recipe_crafted={}",
+        item_count, dim_count, consume_count, kill_count, recipe_count, tick_count, location_count, placed_block_count, enter_block_count, recipe_crafted_count, crafter_recipe_crafted_count
     );
 
     let _ = ITEM_CRITERIA_MAP.set(RwLock::new(item_map));
@@ -173,6 +199,8 @@ pub fn build_criteria_maps(registry: &AdvancementRegistry) {
     let _ = LOCATION_BIOME_CRITERIA_MAP.set(RwLock::new(location_biome_map));
     let _ = PLACED_BLOCK_CRITERIA_MAP.set(RwLock::new(placed_block_map));
     let _ = ENTER_BLOCK_CRITERIA_MAP.set(RwLock::new(enter_block_map));
+    let _ = RECIPE_CRAFTED_CRITERIA_MAP.set(RwLock::new(recipe_crafted_map));
+    let _ = CRAFTER_RECIPE_CRAFTED_CRITERIA_MAP.set(RwLock::new(crafter_recipe_crafted_map));
 }
 
 /// Backwards compatibility alias
@@ -414,6 +442,14 @@ fn get_placed_block_criteria_map() -> &'static RwLock<HashMap<u16, Vec<(Resource
 
 fn get_enter_block_criteria_map() -> &'static RwLock<HashMap<u16, Vec<(ResourceLocation, String)>>> {
     ENTER_BLOCK_CRITERIA_MAP.get_or_init(|| RwLock::new(HashMap::new()))
+}
+
+fn get_recipe_crafted_criteria_map() -> &'static RwLock<HashMap<String, Vec<(ResourceLocation, String)>>> {
+    RECIPE_CRAFTED_CRITERIA_MAP.get_or_init(|| RwLock::new(HashMap::new()))
+}
+
+fn get_crafter_recipe_crafted_criteria_map() -> &'static RwLock<HashMap<String, Vec<(ResourceLocation, String)>>> {
+    CRAFTER_RECIPE_CRAFTED_CRITERIA_MAP.get_or_init(|| RwLock::new(HashMap::new()))
 }
 
 /// Checks if picking up an item should trigger any advancement criteria.
@@ -755,6 +791,44 @@ pub async fn on_enter_block(player: &Arc<Player>, block_state_id: u16) {
     let criteria = {
         let map = get_enter_block_criteria_map().read().unwrap();
         map.get(&block_type_id).cloned()
+    };
+
+    if let Some(criteria) = criteria {
+        for (advancement_id, criterion_name) in criteria {
+            grant_criterion(player, &advancement_id, &criterion_name).await;
+        }
+    }
+}
+
+/// Triggers advancement criteria when player crafts a recipe.
+/// Called after the player takes the crafted item from the result slot.
+///
+/// # Arguments
+/// * `player` - The player who crafted the item
+/// * `recipe_id` - The ID of the recipe that was crafted (e.g., `minecraft:crafting_table`)
+pub async fn on_recipe_crafted(player: &Arc<Player>, recipe_id: &str) {
+    let criteria = {
+        let map = get_recipe_crafted_criteria_map().read().unwrap();
+        map.get(recipe_id).cloned()
+    };
+
+    if let Some(criteria) = criteria {
+        for (advancement_id, criterion_name) in criteria {
+            grant_criterion(player, &advancement_id, &criterion_name).await;
+        }
+    }
+}
+
+/// Triggers advancement criteria when a crafter block crafts a recipe.
+/// Called after the crafter block produces a crafted item.
+///
+/// # Arguments
+/// * `player` - The player who owns/placed the crafter (for advancement tracking)
+/// * `recipe_id` - The ID of the recipe that was crafted (e.g., `minecraft:crafter`)
+pub async fn on_crafter_recipe_crafted(player: &Arc<Player>, recipe_id: &str) {
+    let criteria = {
+        let map = get_crafter_recipe_crafted_criteria_map().read().unwrap();
+        map.get(recipe_id).cloned()
     };
 
     if let Some(criteria) = criteria {
