@@ -4,6 +4,7 @@ use std::collections::HashMap;
 use std::sync::{Arc, OnceLock, RwLock};
 
 use pumpkin_data::item::Item;
+use pumpkin_data::Block;
 use pumpkin_protocol::java::client::play::{
     AdvancementProgress, AdvancementProgressMapping, CUpdateAdvancements, CriterionProgress,
     CriterionProgressMapping,
@@ -38,6 +39,26 @@ static KILL_ENTITY_CRITERIA_MAP: OnceLock<RwLock<HashMap<String, Vec<(ResourceLo
 static RECIPE_CRITERIA_MAP: OnceLock<RwLock<HashMap<String, Vec<(ResourceLocation, String)>>>> =
     OnceLock::new();
 
+/// Global list of tick criteria: list of (advancement_id, criterion_name).
+/// Tick triggers have no conditions and fire on every server tick.
+static TICK_CRITERIA_MAP: OnceLock<RwLock<Vec<(ResourceLocation, String)>>> = OnceLock::new();
+
+/// Global mapping of biome -> list of (advancement_id, criterion_name).
+/// For location triggers that check player biome.
+static LOCATION_BIOME_CRITERIA_MAP: OnceLock<RwLock<HashMap<String, Vec<(ResourceLocation, String)>>>> =
+    OnceLock::new();
+
+/// Global mapping of block ID -> list of (advancement_id, criterion_name).
+/// For placed_block triggers.
+static PLACED_BLOCK_CRITERIA_MAP: OnceLock<RwLock<HashMap<u16, Vec<(ResourceLocation, String)>>>> =
+    OnceLock::new();
+
+/// Global mapping of block type ID -> list of (advancement_id, criterion_name).
+/// For enter_block triggers (e.g., entering water, end gateway).
+/// Uses block type ID (not state ID) to match any state of a block type.
+static ENTER_BLOCK_CRITERIA_MAP: OnceLock<RwLock<HashMap<u16, Vec<(ResourceLocation, String)>>>> =
+    OnceLock::new();
+
 /// Builds all criteria maps from the advancement registry.
 /// Should be called after advancements are loaded.
 pub fn build_criteria_maps(registry: &AdvancementRegistry) {
@@ -46,6 +67,10 @@ pub fn build_criteria_maps(registry: &AdvancementRegistry) {
     let mut consume_map: HashMap<u16, Vec<(ResourceLocation, String)>> = HashMap::new();
     let mut kill_map: HashMap<String, Vec<(ResourceLocation, String)>> = HashMap::new();
     let mut recipe_map: HashMap<String, Vec<(ResourceLocation, String)>> = HashMap::new();
+    let mut tick_list: Vec<(ResourceLocation, String)> = Vec::new();
+    let mut location_biome_map: HashMap<String, Vec<(ResourceLocation, String)>> = HashMap::new();
+    let mut placed_block_map: HashMap<u16, Vec<(ResourceLocation, String)>> = HashMap::new();
+    let mut enter_block_map: HashMap<u16, Vec<(ResourceLocation, String)>> = HashMap::new();
 
     for advancement in registry.all() {
         for (criterion_name, criterion_data) in &advancement.criteria {
@@ -87,6 +112,36 @@ pub fn build_criteria_maps(registry: &AdvancementRegistry) {
                         recipe_map.entry(recipe.to_string()).or_default().push(entry);
                     }
                 }
+                "minecraft:tick" => {
+                    // Tick triggers have no conditions - they fire on server tick
+                    tick_list.push(entry);
+                }
+                "minecraft:location" => {
+                    // Location triggers check player biome/dimension/position
+                    let biomes = extract_location_biomes(conditions);
+                    for biome in biomes {
+                        location_biome_map.entry(biome).or_default().push(entry.clone());
+                    }
+                }
+                "minecraft:placed_block" => {
+                    // Placed block triggers check what block was placed
+                    let block_ids = extract_placed_block_ids(conditions);
+                    if block_ids.is_empty() {
+                        // No specific block - add wildcard entry (block ID 0 as wildcard)
+                        placed_block_map.entry(0).or_default().push(entry);
+                    } else {
+                        for block_id in block_ids {
+                            placed_block_map.entry(block_id).or_default().push(entry.clone());
+                        }
+                    }
+                }
+                "minecraft:enter_block" => {
+                    // Enter block triggers check what block the player entered
+                    let block_ids = extract_enter_block_ids(conditions);
+                    for block_id in block_ids {
+                        enter_block_map.entry(block_id).or_default().push(entry.clone());
+                    }
+                }
                 _ => {
                     // Other triggers not yet implemented
                 }
@@ -99,10 +154,14 @@ pub fn build_criteria_maps(registry: &AdvancementRegistry) {
     let consume_count: usize = consume_map.values().map(|v| v.len()).sum();
     let kill_count: usize = kill_map.values().map(|v| v.len()).sum();
     let recipe_count: usize = recipe_map.values().map(|v| v.len()).sum();
+    let tick_count = tick_list.len();
+    let location_count: usize = location_biome_map.values().map(|v| v.len()).sum();
+    let placed_block_count: usize = placed_block_map.values().map(|v| v.len()).sum();
+    let enter_block_count: usize = enter_block_map.values().map(|v| v.len()).sum();
 
     log::info!(
-        "Built advancement trigger maps: inventory_changed={}, changed_dimension={}, consume_item={}, player_killed_entity={}, recipe_unlocked={}",
-        item_count, dim_count, consume_count, kill_count, recipe_count
+        "Built advancement trigger maps: inventory_changed={}, changed_dimension={}, consume_item={}, player_killed_entity={}, recipe_unlocked={}, tick={}, location={}, placed_block={}, enter_block={}",
+        item_count, dim_count, consume_count, kill_count, recipe_count, tick_count, location_count, placed_block_count, enter_block_count
     );
 
     let _ = ITEM_CRITERIA_MAP.set(RwLock::new(item_map));
@@ -110,6 +169,10 @@ pub fn build_criteria_maps(registry: &AdvancementRegistry) {
     let _ = CONSUME_CRITERIA_MAP.set(RwLock::new(consume_map));
     let _ = KILL_ENTITY_CRITERIA_MAP.set(RwLock::new(kill_map));
     let _ = RECIPE_CRITERIA_MAP.set(RwLock::new(recipe_map));
+    let _ = TICK_CRITERIA_MAP.set(RwLock::new(tick_list));
+    let _ = LOCATION_BIOME_CRITERIA_MAP.set(RwLock::new(location_biome_map));
+    let _ = PLACED_BLOCK_CRITERIA_MAP.set(RwLock::new(placed_block_map));
+    let _ = ENTER_BLOCK_CRITERIA_MAP.set(RwLock::new(enter_block_map));
 }
 
 /// Backwards compatibility alias
@@ -235,6 +298,92 @@ fn extract_entity_types(conditions: &serde_json::Value) -> Vec<String> {
     types
 }
 
+/// Extracts biome identifiers from location trigger conditions.
+/// Location triggers use player conditions with entity_properties predicates.
+fn extract_location_biomes(conditions: &serde_json::Value) -> Vec<String> {
+    let mut biomes = Vec::new();
+
+    // Location trigger has "player" array with entity_properties conditions
+    if let Some(player_array) = conditions.get("player").and_then(|v| v.as_array()) {
+        for condition in player_array {
+            // Check if this is an entity_properties condition
+            if condition.get("condition").and_then(|v| v.as_str()) == Some("minecraft:entity_properties") {
+                // Look for predicate.location.biomes
+                if let Some(predicate) = condition.get("predicate") {
+                    if let Some(location) = predicate.get("location") {
+                        if let Some(biome) = location.get("biomes").and_then(|v| v.as_str()) {
+                            biomes.push(biome.to_string());
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    biomes
+}
+
+/// Extracts block IDs from placed_block trigger conditions.
+fn extract_placed_block_ids(conditions: &serde_json::Value) -> Vec<u16> {
+    let mut block_ids = Vec::new();
+
+    // placed_block has "location" array with block predicates
+    if let Some(location_array) = conditions.get("location").and_then(|v| v.as_array()) {
+        for condition in location_array {
+            // Direct block field (e.g., "block": "minecraft:creaking_heart")
+            if let Some(block) = condition.get("block").and_then(|v| v.as_str()) {
+                if let Some(id) = resolve_block_string(block) {
+                    block_ids.push(id);
+                }
+            }
+        }
+    }
+
+    block_ids
+}
+
+/// Extracts block type IDs from enter_block trigger conditions.
+/// Uses block type ID (not state ID) since blocks like water have many states.
+fn extract_enter_block_ids(conditions: &serde_json::Value) -> Vec<u16> {
+    let mut block_ids = Vec::new();
+
+    // enter_block has a simple "block" field
+    if let Some(block) = conditions.get("block").and_then(|v| v.as_str()) {
+        if let Some(id) = resolve_block_type_id(block) {
+            block_ids.push(id);
+        }
+    }
+
+    block_ids
+}
+
+/// Resolves a block string to its state ID (for placed_block which needs specific state).
+fn resolve_block_string(s: &str) -> Option<u16> {
+    if s.starts_with('#') {
+        // It's a tag - skip for now
+        log::debug!("Block tag not yet supported: {s}");
+        None
+    } else {
+        // Direct block reference
+        let name = s.strip_prefix("minecraft:").unwrap_or(s);
+        Block::from_registry_key(name).map(|block| block.default_state.id)
+    }
+}
+
+/// Resolves a block string to its block type ID (not state ID).
+/// Used for enter_block where we need to match any state of a block type.
+fn resolve_block_type_id(s: &str) -> Option<u16> {
+    if s.starts_with('#') {
+        // It's a tag - skip for now
+        log::debug!("Block tag not yet supported: {s}");
+        None
+    } else {
+        // Direct block reference - return block type ID
+        let name = s.strip_prefix("minecraft:").unwrap_or(s);
+        Block::from_registry_key(name).map(|block| block.id)
+    }
+}
+
 fn get_dimension_criteria_map() -> &'static RwLock<HashMap<(Option<String>, Option<String>), Vec<(ResourceLocation, String)>>> {
     DIMENSION_CRITERIA_MAP.get_or_init(|| RwLock::new(HashMap::new()))
 }
@@ -249,6 +398,22 @@ fn get_kill_entity_criteria_map() -> &'static RwLock<HashMap<String, Vec<(Resour
 
 fn get_recipe_criteria_map() -> &'static RwLock<HashMap<String, Vec<(ResourceLocation, String)>>> {
     RECIPE_CRITERIA_MAP.get_or_init(|| RwLock::new(HashMap::new()))
+}
+
+fn get_tick_criteria_map() -> &'static RwLock<Vec<(ResourceLocation, String)>> {
+    TICK_CRITERIA_MAP.get_or_init(|| RwLock::new(Vec::new()))
+}
+
+fn get_location_biome_criteria_map() -> &'static RwLock<HashMap<String, Vec<(ResourceLocation, String)>>> {
+    LOCATION_BIOME_CRITERIA_MAP.get_or_init(|| RwLock::new(HashMap::new()))
+}
+
+fn get_placed_block_criteria_map() -> &'static RwLock<HashMap<u16, Vec<(ResourceLocation, String)>>> {
+    PLACED_BLOCK_CRITERIA_MAP.get_or_init(|| RwLock::new(HashMap::new()))
+}
+
+fn get_enter_block_criteria_map() -> &'static RwLock<HashMap<u16, Vec<(ResourceLocation, String)>>> {
+    ENTER_BLOCK_CRITERIA_MAP.get_or_init(|| RwLock::new(HashMap::new()))
 }
 
 /// Checks if picking up an item should trigger any advancement criteria.
@@ -478,6 +643,118 @@ pub async fn on_recipe_unlocked(player: &Arc<Player>, recipe_id: &str) {
     let criteria = {
         let map = get_recipe_criteria_map().read().unwrap();
         map.get(recipe_id).cloned()
+    };
+
+    if let Some(criteria) = criteria {
+        for (advancement_id, criterion_name) in criteria {
+            grant_criterion(player, &advancement_id, &criterion_name).await;
+        }
+    }
+}
+
+/// Triggers all tick-based advancement criteria.
+/// Called once per server tick for each player.
+/// This is used for advancements that should be granted immediately (e.g., recipe unlocks).
+///
+/// # Arguments
+/// * `player` - The player to check tick criteria for
+pub async fn on_tick(player: &Arc<Player>) {
+    let criteria = {
+        let list = get_tick_criteria_map().read().unwrap();
+        list.clone()
+    };
+
+    for (advancement_id, criterion_name) in criteria {
+        grant_criterion(player, &advancement_id, &criterion_name).await;
+    }
+}
+
+/// Triggers location-based advancement criteria.
+/// Called every 20 ticks to check player location conditions.
+/// Matches vanilla behavior from ServerPlayerEntity.java:717-718
+///
+/// # Arguments
+/// * `player` - The player to check location for
+pub async fn on_location(player: &Arc<Player>) {
+    // Get player's current position and biome
+    let pos = player.living_entity.entity.pos.load();
+    let block_pos = pumpkin_util::math::position::BlockPos(
+        pumpkin_util::math::vector3::Vector3::new(
+            pos.x.floor() as i32,
+            pos.y.floor() as i32,
+            pos.z.floor() as i32,
+        ),
+    );
+
+    let world = player.world();
+    let biome = world.level.get_rough_biome(&block_pos).await;
+    let biome_id = format!("minecraft:{}", biome.registry_id);
+
+    // Check biome-based location criteria
+    let criteria = {
+        let map = get_location_biome_criteria_map().read().unwrap();
+        map.get(&biome_id).cloned()
+    };
+
+    if let Some(criteria) = criteria {
+        for (advancement_id, criterion_name) in criteria {
+            grant_criterion(player, &advancement_id, &criterion_name).await;
+        }
+    }
+
+    // TODO: Check other location conditions (equipment, position predicates, etc.)
+    // Vanilla evaluates full LootContextPredicate which includes:
+    // - Entity position
+    // - Equipment (e.g., boots on specific block)
+    // - Effects
+    // - Dimension
+    // For now, biome-only checks cover "Adventuring Time" advancement
+}
+
+/// Triggers advancement criteria when player places a block.
+/// Called after a block is successfully placed.
+///
+/// # Arguments
+/// * `player` - The player who placed the block
+/// * `block_state_id` - The state ID of the placed block
+pub async fn on_placed_block(player: &Arc<Player>, block_state_id: u16) {
+    let criteria = {
+        let map = get_placed_block_criteria_map().read().unwrap();
+        let mut results = Vec::new();
+
+        // Check for specific block
+        if let Some(c) = map.get(&block_state_id) {
+            results.extend(c.clone());
+        }
+        // Also check wildcard criteria (any block, using ID 0)
+        if let Some(c) = map.get(&0) {
+            results.extend(c.clone());
+        }
+
+        results
+    };
+
+    for (advancement_id, criterion_name) in criteria {
+        grant_criterion(player, &advancement_id, &criterion_name).await;
+    }
+}
+
+/// Triggers advancement criteria when player enters a block.
+/// Called when a player moves into a block (e.g., water, end gateway, cobweb).
+/// Matches vanilla behavior from ServerPlayerEntity.onBlockCollision(BlockState state)
+///
+/// # Arguments
+/// * `player` - The player who entered the block
+/// * `block_state_id` - The state ID of the block the player entered
+pub async fn on_enter_block(player: &Arc<Player>, block_state_id: u16) {
+    // Convert state ID to block type ID for lookup
+    // This handles blocks with multiple states (like water with different levels)
+    let block = Block::from_state_id(block_state_id);
+    let block_type_id = block.id;
+
+    let criteria = {
+        let map = get_enter_block_criteria_map().read().unwrap();
+        map.get(&block_type_id).cloned()
     };
 
     if let Some(criteria) = criteria {

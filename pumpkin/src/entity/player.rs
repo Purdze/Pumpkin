@@ -1380,6 +1380,15 @@ impl Player {
         self.tick_experience().await;
         self.tick_health().await;
 
+        // Advancement tick trigger - called every tick (vanilla: ServerPlayerEntity.java:600)
+        crate::advancement::trigger::on_tick(self).await;
+
+        // Check location-based advancement criteria every 20 ticks (vanilla: ServerPlayerEntity.java:717-718)
+        let tick = self.tick_counter.load(Ordering::Relaxed);
+        if tick % 20 == 0 {
+            crate::advancement::trigger::on_location(self).await;
+        }
+
         // Timeout/keep alive handling
         self.tick_client_load_timeout();
 

@@ -349,6 +349,14 @@ impl JavaClient {
                     player.update_last_action_time();
                 }
                 player.progress_motion(delta).await;
+
+                // Check for enter_block advancement trigger when player enters a new block position
+                let new_block_pos = BlockPos(Vector3::new(pos.x.floor() as i32, pos.y.floor() as i32, pos.z.floor() as i32));
+                let old_block_pos = BlockPos(Vector3::new(last_pos.x.floor() as i32, last_pos.y.floor() as i32, last_pos.z.floor() as i32));
+                if new_block_pos != old_block_pos {
+                    let block_state = world.get_block_state(&new_block_pos).await;
+                    crate::advancement::trigger::on_enter_block(player, block_state.id).await;
+                }
             }
 
             'cancelled: {
@@ -481,6 +489,14 @@ impl JavaClient {
                     player.update_last_action_time();
                 }
                 player.progress_motion(delta).await;
+
+                // Check for enter_block advancement trigger when player enters a new block position
+                let new_block_pos = BlockPos(Vector3::new(pos.x.floor() as i32, pos.y.floor() as i32, pos.z.floor() as i32));
+                let old_block_pos = BlockPos(Vector3::new(last_pos.x.floor() as i32, last_pos.y.floor() as i32, last_pos.z.floor() as i32));
+                if new_block_pos != old_block_pos {
+                    let block_state = world.get_block_state(&new_block_pos).await;
+                    crate::advancement::trigger::on_enter_block(player, block_state.id).await;
+                }
             }
 
             'cancelled: {
@@ -1488,7 +1504,7 @@ impl JavaClient {
 
     pub async fn handle_use_item_on(
         &self,
-        player: &Player,
+        player: &Arc<Player>,
         use_item_on: SUseItemOn,
         server: &Arc<Server>,
     ) -> Result<(), BlockPlacingError> {
@@ -1936,7 +1952,7 @@ impl JavaClient {
     #[expect(clippy::too_many_lines)]
     async fn run_is_block_place(
         &self,
-        player: &Player,
+        player: &Arc<Player>,
         block: &'static Block,
         server: &Server,
         use_item_on: SUseItemOn,
@@ -2105,6 +2121,9 @@ impl JavaClient {
             .block_registry
             .player_placed(&world, block, new_state, &final_block_pos, face, player)
             .await;
+
+        // Trigger placed_block advancement criteria
+        crate::advancement::trigger::on_placed_block(player, new_state).await;
 
         // The block was placed successfully, so decrement their inventory
         Ok(true)
