@@ -166,7 +166,9 @@ impl AdvancementProgressData {
     pub fn is_done(&self, requirements: &[Vec<String>]) -> bool {
         // All requirement groups must have at least one criterion obtained
         requirements.iter().all(|group| {
-            group.iter().any(|criterion| self.is_criterion_obtained(criterion))
+            group
+                .iter()
+                .any(|criterion| self.is_criterion_obtained(criterion))
         })
     }
 

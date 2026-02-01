@@ -61,10 +61,7 @@ impl<T: CriterionConditions + 'static> AbstractCriterion<T> {
     /// Starts tracking conditions for a player.
     pub fn start_tracking(&self, player_id: u128, container: Arc<ConditionsContainer<T>>) {
         let mut progressions = self.progressions.write().unwrap();
-        progressions
-            .entry(player_id)
-            .or_default()
-            .insert(container);
+        progressions.entry(player_id).or_default().insert(container);
     }
 
     /// Stops tracking conditions for a player.

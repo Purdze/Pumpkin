@@ -378,9 +378,7 @@ impl EntityBase for ItemEntity {
                 *delay == 0
             };
 
-            if can_pickup
-                && player.living_entity.health.load() > 0.0
-            {
+            if can_pickup && player.living_entity.health.load() > 0.0 {
                 // Clone the item before pickup to check for advancement triggers
                 let item_for_advancement = self.item_stack.lock().await.clone();
 

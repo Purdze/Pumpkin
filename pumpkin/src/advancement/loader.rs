@@ -4,7 +4,7 @@ use std::collections::HashMap;
 use std::fs;
 use std::path::Path;
 
-use include_dir::{include_dir, Dir};
+use include_dir::{Dir, include_dir};
 use pumpkin_data::item::Item;
 use pumpkin_util::resource_location::ResourceLocation;
 use pumpkin_util::text::TextComponent;
@@ -14,10 +14,12 @@ use serde::Deserialize;
 use super::{AdvancementData, AdvancementDisplayData, AdvancementFrame, CriterionData};
 
 /// Embedded advancement data from compile time.
-static EMBEDDED_ADVANCEMENTS: Dir<'_> = include_dir!("$CARGO_MANIFEST_DIR/src/data/minecraft/advancement");
+static EMBEDDED_ADVANCEMENTS: Dir<'_> =
+    include_dir!("$CARGO_MANIFEST_DIR/src/data/minecraft/advancement");
 
 /// Loads all advancements from embedded data (compiled into the binary).
 /// This is the primary method - advancements are embedded like vanilla Minecraft.
+#[must_use]
 pub fn load_embedded_advancements(namespace: &str) -> Vec<AdvancementData> {
     let mut advancements = Vec::new();
     load_embedded_recursive(&EMBEDDED_ADVANCEMENTS, namespace, "", &mut advancements);
@@ -38,20 +40,22 @@ fn load_embedded_recursive(
 ) {
     // Process files in this directory
     for file in dir.files() {
-        if let Some(ext) = file.path().extension() {
-            if ext == "json" {
-                let file_name = file.path().file_stem().unwrap().to_string_lossy();
-                let advancement_id = if prefix.is_empty() {
-                    format!("{namespace}:{file_name}")
-                } else {
-                    format!("{namespace}:{prefix}/{file_name}")
-                };
+        if let Some(ext) = file.path().extension()
+            && ext == "json"
+        {
+            let file_name = file.path().file_stem().unwrap().to_string_lossy();
+            let advancement_id = if prefix.is_empty() {
+                format!("{namespace}:{file_name}")
+            } else {
+                format!("{namespace}:{prefix}/{file_name}")
+            };
 
-                if let Some(content) = file.contents_utf8() {
-                    match serde_json::from_str::<JsonAdvancement>(content) {
-                        Ok(json) => advancements.push(convert_json_advancement(json, &advancement_id)),
-                        Err(e) => log::warn!("Failed to parse advancement {advancement_id}: {e}"),
+            if let Some(content) = file.contents_utf8() {
+                match serde_json::from_str::<JsonAdvancement>(content) {
+                    Ok(json) => {
+                        advancements.push(convert_json_advancement(json, &advancement_id));
                     }
+                    Err(e) => log::warn!("Failed to parse advancement {advancement_id}: {e}"),
                 }
             }
         }
@@ -85,7 +89,9 @@ pub fn load_advancements_from_dir(
     };
 
     if !advancement_path.exists() {
-        return Err(LoadError::PathNotFound(advancement_path.display().to_string()));
+        return Err(LoadError::PathNotFound(
+            advancement_path.display().to_string(),
+        ));
     }
 
     load_advancements_recursive(&advancement_path, namespace, "", &mut advancements)?;
@@ -97,7 +103,7 @@ pub fn load_advancements_from_dir(
 }
 
 /// Calculates x/y positions for advancements using the Buchheim algorithm.
-/// This matches vanilla Minecraft's AdvancementPositioner exactly.
+/// This matches vanilla Minecraft's `AdvancementPositioner` exactly.
 fn calculate_layout(advancements: &mut [AdvancementData]) {
     // Build children map
     let mut children_map: HashMap<ResourceLocation, Vec<usize>> = HashMap::new();
@@ -200,8 +206,8 @@ impl AdvancementPositioner {
         advancements: &[AdvancementData],
         children_map: &HashMap<ResourceLocation, Vec<usize>>,
         root_adv_idx: usize,
-    ) -> Vec<AdvancementPositioner> {
-        let mut positioners: Vec<AdvancementPositioner> = Vec::new();
+    ) -> Vec<Self> {
+        let mut positioners: Vec<Self> = Vec::new();
 
         // Build the positioner tree recursively
         Self::build_tree_recursive(
@@ -232,10 +238,11 @@ impl AdvancementPositioner {
     }
 
     /// Builds the positioner tree recursively
+    #[allow(clippy::too_many_arguments)]
     fn build_tree_recursive(
         advancements: &[AdvancementData],
         children_map: &HashMap<ResourceLocation, Vec<usize>>,
-        positioners: &mut Vec<AdvancementPositioner>,
+        positioners: &mut Vec<Self>,
         adv_idx: usize,
         parent_pos_idx: Option<usize>,
         previous_sibling_pos_idx: Option<usize>,
@@ -244,7 +251,7 @@ impl AdvancementPositioner {
     ) -> usize {
         let my_idx = positioners.len();
 
-        let pos = AdvancementPositioner {
+        let pos = Self {
             advancement_idx: adv_idx,
             parent_idx: parent_pos_idx,
             previous_sibling_idx: previous_sibling_pos_idx,
@@ -292,7 +299,7 @@ impl AdvancementPositioner {
     }
 
     /// First pass: calculate row positions recursively
-    fn calculate_recursive(positioners: &mut Vec<AdvancementPositioner>, idx: usize) {
+    fn calculate_recursive(positioners: &mut Vec<Self>, idx: usize) {
         let children = positioners[idx].children.clone();
 
         if children.is_empty() {
@@ -317,7 +324,7 @@ impl AdvancementPositioner {
             // Center on children
             let first_child_row = positioners[children[0]].row;
             let last_child_row = positioners[*children.last().unwrap()].row;
-            let mid = (first_child_row + last_child_row) / 2.0;
+            let mid = f32::midpoint(first_child_row, last_child_row);
 
             if let Some(prev_idx) = positioners[idx].previous_sibling_idx {
                 positioners[idx].row = positioners[prev_idx].row + 1.0;
@@ -330,13 +337,12 @@ impl AdvancementPositioner {
 
     /// Collision detection and resolution between subtrees
     fn on_finish_calculation(
-        positioners: &mut Vec<AdvancementPositioner>,
+        positioners: &mut [Self],
         idx: usize,
         mut default_ancestor_idx: usize,
     ) -> usize {
-        let prev_sibling_idx = match positioners[idx].previous_sibling_idx {
-            Some(prev) => prev,
-            None => return default_ancestor_idx,
+        let Some(prev_sibling_idx) = positioners[idx].previous_sibling_idx else {
+            return default_ancestor_idx;
         };
 
         let mut inside_idx = idx;
@@ -416,28 +422,20 @@ impl AdvancementPositioner {
         default_ancestor_idx
     }
 
-    fn get_first_child(positioners: &[AdvancementPositioner], idx: usize) -> Option<usize> {
-        if let Some(sub) = positioners[idx].substitute_child_idx {
-            Some(sub)
-        } else if !positioners[idx].children.is_empty() {
-            Some(positioners[idx].children[0])
-        } else {
-            None
-        }
+    fn get_first_child(positioners: &[Self], idx: usize) -> Option<usize> {
+        positioners[idx]
+            .substitute_child_idx
+            .or_else(|| positioners[idx].children.first().copied())
     }
 
-    fn get_last_child(positioners: &[AdvancementPositioner], idx: usize) -> Option<usize> {
-        if let Some(sub) = positioners[idx].substitute_child_idx {
-            Some(sub)
-        } else if !positioners[idx].children.is_empty() {
-            Some(*positioners[idx].children.last().unwrap())
-        } else {
-            None
-        }
+    fn get_last_child(positioners: &[Self], idx: usize) -> Option<usize> {
+        positioners[idx]
+            .substitute_child_idx
+            .or_else(|| positioners[idx].children.last().copied())
     }
 
     fn get_ancestor(
-        positioners: &[AdvancementPositioner],
+        positioners: &[Self],
         left_sibling_idx: usize,
         current_idx: usize,
         default_ancestor_idx: usize,
@@ -454,14 +452,13 @@ impl AdvancementPositioner {
     }
 
     fn push_down(
-        positioners: &mut Vec<AdvancementPositioner>,
+        positioners: &mut [Self],
         ancestor_idx: usize,
         current_idx: usize,
         move_distance: f32,
     ) {
-        let subtrees =
-            (positioners[current_idx].children_size - positioners[ancestor_idx].children_size)
-                as f32;
+        let subtrees = (positioners[current_idx].children_size
+            - positioners[ancestor_idx].children_size) as f32;
         if subtrees != 0.0 {
             positioners[current_idx].shift_acceleration -= move_distance / subtrees;
             positioners[ancestor_idx].shift_acceleration += move_distance / subtrees;
@@ -472,7 +469,7 @@ impl AdvancementPositioner {
     }
 
     /// Apply accumulated shifts to children
-    fn on_finish_children_calculation(positioners: &mut Vec<AdvancementPositioner>, idx: usize) {
+    fn on_finish_children_calculation(positioners: &mut [Self], idx: usize) {
         let children = positioners[idx].children.clone();
         let mut shift = 0.0f32;
         let mut change = 0.0f32;
@@ -488,7 +485,7 @@ impl AdvancementPositioner {
 
     /// Find minimum row value in the tree
     fn find_min_row_recursive(
-        positioners: &mut Vec<AdvancementPositioner>,
+        positioners: &mut Vec<Self>,
         idx: usize,
         delta_row: f32,
         depth: i32,
@@ -512,11 +509,7 @@ impl AdvancementPositioner {
     }
 
     /// Shift all rows by delta
-    fn increase_row_recursive(
-        positioners: &mut Vec<AdvancementPositioner>,
-        idx: usize,
-        delta: f32,
-    ) {
+    fn increase_row_recursive(positioners: &mut Vec<Self>, idx: usize, delta: f32) {
         positioners[idx].row += delta;
 
         let children = positioners[idx].children.clone();
@@ -524,7 +517,6 @@ impl AdvancementPositioner {
             Self::increase_row_recursive(positioners, child_idx, delta);
         }
     }
-
 }
 
 fn load_advancements_recursive(
@@ -610,9 +602,9 @@ fn convert_json_advancement(json: JsonAdvancement, id: &str) -> AdvancementData 
         .collect();
 
     // Requirements: if not specified, all criteria must be met (AND)
-    let requirements = json.requirements.unwrap_or_else(|| {
-        criteria.keys().map(|k| vec![k.clone()]).collect()
-    });
+    let requirements = json
+        .requirements
+        .unwrap_or_else(|| criteria.keys().map(|k| vec![k.clone()]).collect());
 
     AdvancementData {
         id: ResourceLocation::from(id),

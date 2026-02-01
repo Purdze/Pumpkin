@@ -4,8 +4,8 @@ use std::collections::HashMap;
 use std::path::Path;
 use std::sync::Arc;
 
-use std::sync::RwLock;
 use pumpkin_util::resource_location::ResourceLocation;
+use std::sync::RwLock;
 
 use super::loader;
 use super::{AdvancementData, AdvancementDisplayData, AdvancementFrame, CriterionData};

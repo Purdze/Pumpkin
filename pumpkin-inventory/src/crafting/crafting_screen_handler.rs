@@ -235,11 +235,11 @@ async fn recipe_matches<'a>(
 }
 
 /// Gets the recipe ID (result item ID) from a crafting recipe type.
-fn get_recipe_id(recipe: &CraftingRecipeTypes) -> Option<&'static str> {
+const fn get_recipe_id(recipe: &CraftingRecipeTypes) -> Option<&'static str> {
     match recipe {
-        CraftingRecipeTypes::CraftingShaped { result, .. } => Some(result.id),
-        CraftingRecipeTypes::CraftingShapeless { result, .. } => Some(result.id),
-        CraftingRecipeTypes::CraftingTransmute { result, .. } => Some(result.id),
+        CraftingRecipeTypes::CraftingShaped { result, .. }
+        | CraftingRecipeTypes::CraftingShapeless { result, .. }
+        | CraftingRecipeTypes::CraftingTransmute { result, .. } => Some(result.id),
         CraftingRecipeTypes::CraftingDecoratedPot { .. } => Some("minecraft:decorated_pot"),
         CraftingRecipeTypes::CraftingSpecial => None,
     }

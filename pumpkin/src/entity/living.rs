@@ -926,21 +926,17 @@ impl LivingEntity {
             self.entity.pose.store(EntityPose::Dying);
 
             // Trigger player_killed_entity advancement criteria
-            if let Some(cause_entity) = cause {
-                if cause_entity.get_entity().entity_type == &EntityType::PLAYER {
-                    // Get the player who killed this entity
-                    if let Some(killer_player) = world
-                        .get_player_by_id(cause_entity.get_entity().entity_id)
-                        .await
-                    {
-                        let killed_entity_type = self.entity.entity_type.resource_name;
-                        crate::advancement::trigger::on_player_killed_entity(
-                            &killer_player,
-                            killed_entity_type,
-                        )
-                        .await;
-                    }
-                }
+            if let Some(cause_entity) = cause
+                && cause_entity.get_entity().entity_type == &EntityType::PLAYER
+                && let Some(killer_player) =
+                    world.get_player_by_id(cause_entity.get_entity().entity_id)
+            {
+                let killed_entity_type = self.entity.entity_type.resource_name;
+                crate::advancement::trigger::on_player_killed_entity(
+                    &killer_player,
+                    killed_entity_type,
+                )
+                .await;
             }
 
             let block_pos = self.entity.block_pos.load();
@@ -1295,7 +1291,12 @@ impl EntityBase for LivingEntity {
                             .await;
 
                         // Trigger consume_item advancement criteria
-                        if let Some(player_arc) = self.entity.world.get_player_by_id(self.entity.entity_id).await {
+                        if let Some(player_arc) = self
+                            .entity
+                            .world
+                            .load()
+                            .get_player_by_id(self.entity.entity_id)
+                        {
                             crate::advancement::trigger::on_consume_item(&player_arc, item).await;
                         }
                     }

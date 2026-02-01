@@ -10,8 +10,8 @@ use std::path::{Path, PathBuf};
 
 use pumpkin_util::resource_location::ResourceLocation;
 use serde::{Deserialize, Serialize};
-use time::format_description::well_known::Rfc3339;
 use time::OffsetDateTime;
+use time::format_description::well_known::Rfc3339;
 use uuid::Uuid;
 
 use super::AdvancementProgressData;
@@ -62,6 +62,7 @@ fn iso_to_millis(iso: &str) -> Option<i64> {
 ///
 /// Returns a map of advancement ID -> progress data.
 /// If the file doesn't exist or is invalid, returns an empty map.
+#[must_use]
 pub fn load_progress(
     world_path: &Path,
     player_uuid: Uuid,
@@ -107,6 +108,7 @@ pub fn load_progress(
 /// Saves advancement progress for a player to disk.
 ///
 /// Only saves advancements that have at least one criterion obtained.
+#[allow(clippy::implicit_hasher)]
 pub fn save_progress(
     world_path: &Path,
     player_uuid: Uuid,
@@ -140,10 +142,8 @@ pub fn save_progress(
             .get(id)
             .is_some_and(|reqs| adv_progress.is_done(reqs));
 
-        json.advancements.insert(
-            id.to_string(),
-            JsonAdvancementProgress { criteria, done },
-        );
+        json.advancements
+            .insert(id.to_string(), JsonAdvancementProgress { criteria, done });
     }
 
     // Write to file with pretty printing (like vanilla)
@@ -159,7 +159,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_millis_to_iso_roundtrip() {
+    fn millis_to_iso_roundtrip() {
         let millis: i64 = 1_700_000_000_000; // Some timestamp
         let iso = millis_to_iso(millis);
         let back = iso_to_millis(&iso).unwrap();

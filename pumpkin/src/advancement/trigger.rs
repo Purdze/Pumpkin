@@ -1,10 +1,22 @@
 //! Advancement triggers - called when game events happen.
 
+#![allow(
+    clippy::type_complexity,
+    clippy::doc_markdown,
+    clippy::too_many_lines,
+    clippy::redundant_closure_for_method_calls,
+    clippy::uninlined_format_args,
+    clippy::collapsible_if,
+    clippy::manual_strip,
+    clippy::explicit_iter_loop,
+    clippy::too_long_first_doc_paragraph
+)]
+
 use std::collections::HashMap;
 use std::sync::{Arc, OnceLock, RwLock};
 
-use pumpkin_data::item::Item;
 use pumpkin_data::Block;
+use pumpkin_data::item::Item;
 use pumpkin_protocol::java::client::play::{
     AdvancementProgress, AdvancementProgressMapping, CUpdateAdvancements, CriterionProgress,
     CriterionProgressMapping,
@@ -21,19 +33,21 @@ static ITEM_CRITERIA_MAP: OnceLock<RwLock<HashMap<u16, Vec<(ResourceLocation, St
     OnceLock::new();
 
 /// Global mapping of (from_dimension, to_dimension) -> list of (advancement_id, criterion_name).
-/// For changed_dimension triggers.
-static DIMENSION_CRITERIA_MAP: OnceLock<RwLock<HashMap<(Option<String>, Option<String>), Vec<(ResourceLocation, String)>>>> =
-    OnceLock::new();
+/// For `changed_dimension` triggers.
+static DIMENSION_CRITERIA_MAP: OnceLock<
+    RwLock<HashMap<(Option<String>, Option<String>), Vec<(ResourceLocation, String)>>>,
+> = OnceLock::new();
 
 /// Global mapping of item ID -> list of (advancement_id, criterion_name).
-/// For consume_item triggers (eating/drinking).
+/// For `consume_item` triggers (eating/drinking).
 static CONSUME_CRITERIA_MAP: OnceLock<RwLock<HashMap<u16, Vec<(ResourceLocation, String)>>>> =
     OnceLock::new();
 
 /// Global mapping of entity type -> list of (advancement_id, criterion_name).
-/// For player_killed_entity triggers.
-static KILL_ENTITY_CRITERIA_MAP: OnceLock<RwLock<HashMap<String, Vec<(ResourceLocation, String)>>>> =
-    OnceLock::new();
+/// For `player_killed_entity` triggers.
+static KILL_ENTITY_CRITERIA_MAP: OnceLock<
+    RwLock<HashMap<String, Vec<(ResourceLocation, String)>>>,
+> = OnceLock::new();
 
 /// Global list of recipe_unlocked criteria: (recipe_id, advancement_id, criterion_name).
 static RECIPE_CRITERIA_MAP: OnceLock<RwLock<HashMap<String, Vec<(ResourceLocation, String)>>>> =
@@ -45,8 +59,9 @@ static TICK_CRITERIA_MAP: OnceLock<RwLock<Vec<(ResourceLocation, String)>>> = On
 
 /// Global mapping of biome -> list of (advancement_id, criterion_name).
 /// For location triggers that check player biome.
-static LOCATION_BIOME_CRITERIA_MAP: OnceLock<RwLock<HashMap<String, Vec<(ResourceLocation, String)>>>> =
-    OnceLock::new();
+static LOCATION_BIOME_CRITERIA_MAP: OnceLock<
+    RwLock<HashMap<String, Vec<(ResourceLocation, String)>>>,
+> = OnceLock::new();
 
 /// Global mapping of block ID -> list of (advancement_id, criterion_name).
 /// For placed_block triggers.
@@ -61,19 +76,24 @@ static ENTER_BLOCK_CRITERIA_MAP: OnceLock<RwLock<HashMap<u16, Vec<(ResourceLocat
 
 /// Global mapping of recipe_id -> list of (advancement_id, criterion_name).
 /// For recipe_crafted triggers (player crafting).
-static RECIPE_CRAFTED_CRITERIA_MAP: OnceLock<RwLock<HashMap<String, Vec<(ResourceLocation, String)>>>> =
-    OnceLock::new();
+static RECIPE_CRAFTED_CRITERIA_MAP: OnceLock<
+    RwLock<HashMap<String, Vec<(ResourceLocation, String)>>>,
+> = OnceLock::new();
 
 /// Global mapping of recipe_id -> list of (advancement_id, criterion_name).
 /// For crafter_recipe_crafted triggers (crafter block crafting).
-static CRAFTER_RECIPE_CRAFTED_CRITERIA_MAP: OnceLock<RwLock<HashMap<String, Vec<(ResourceLocation, String)>>>> =
-    OnceLock::new();
+static CRAFTER_RECIPE_CRAFTED_CRITERIA_MAP: OnceLock<
+    RwLock<HashMap<String, Vec<(ResourceLocation, String)>>>,
+> = OnceLock::new();
 
 /// Builds all criteria maps from the advancement registry.
 /// Should be called after advancements are loaded.
 pub fn build_criteria_maps(registry: &AdvancementRegistry) {
     let mut item_map: HashMap<u16, Vec<(ResourceLocation, String)>> = HashMap::new();
-    let mut dimension_map: HashMap<(Option<String>, Option<String>), Vec<(ResourceLocation, String)>> = HashMap::new();
+    let mut dimension_map: HashMap<
+        (Option<String>, Option<String>),
+        Vec<(ResourceLocation, String)>,
+    > = HashMap::new();
     let mut consume_map: HashMap<u16, Vec<(ResourceLocation, String)>> = HashMap::new();
     let mut kill_map: HashMap<String, Vec<(ResourceLocation, String)>> = HashMap::new();
     let mut recipe_map: HashMap<String, Vec<(ResourceLocation, String)>> = HashMap::new();
@@ -82,7 +102,8 @@ pub fn build_criteria_maps(registry: &AdvancementRegistry) {
     let mut placed_block_map: HashMap<u16, Vec<(ResourceLocation, String)>> = HashMap::new();
     let mut enter_block_map: HashMap<u16, Vec<(ResourceLocation, String)>> = HashMap::new();
     let mut recipe_crafted_map: HashMap<String, Vec<(ResourceLocation, String)>> = HashMap::new();
-    let mut crafter_recipe_crafted_map: HashMap<String, Vec<(ResourceLocation, String)>> = HashMap::new();
+    let mut crafter_recipe_crafted_map: HashMap<String, Vec<(ResourceLocation, String)>> =
+        HashMap::new();
 
     for advancement in registry.all() {
         for (criterion_name, criterion_data) in &advancement.criteria {
@@ -98,8 +119,14 @@ pub fn build_criteria_maps(registry: &AdvancementRegistry) {
                     }
                 }
                 "minecraft:changed_dimension" => {
-                    let from = conditions.get("from").and_then(|v| v.as_str()).map(String::from);
-                    let to = conditions.get("to").and_then(|v| v.as_str()).map(String::from);
+                    let from = conditions
+                        .get("from")
+                        .and_then(|v| v.as_str())
+                        .map(String::from);
+                    let to = conditions
+                        .get("to")
+                        .and_then(|v| v.as_str())
+                        .map(String::from);
                     dimension_map.entry((from, to)).or_default().push(entry);
                 }
                 "minecraft:consume_item" => {
@@ -121,7 +148,10 @@ pub fn build_criteria_maps(registry: &AdvancementRegistry) {
                 }
                 "minecraft:recipe_unlocked" => {
                     if let Some(recipe) = conditions.get("recipe").and_then(|v| v.as_str()) {
-                        recipe_map.entry(recipe.to_string()).or_default().push(entry);
+                        recipe_map
+                            .entry(recipe.to_string())
+                            .or_default()
+                            .push(entry);
                     }
                 }
                 "minecraft:tick" => {
@@ -132,7 +162,10 @@ pub fn build_criteria_maps(registry: &AdvancementRegistry) {
                     // Location triggers check player biome/dimension/position
                     let biomes = extract_location_biomes(conditions);
                     for biome in biomes {
-                        location_biome_map.entry(biome).or_default().push(entry.clone());
+                        location_biome_map
+                            .entry(biome)
+                            .or_default()
+                            .push(entry.clone());
                     }
                 }
                 "minecraft:placed_block" => {
@@ -143,7 +176,10 @@ pub fn build_criteria_maps(registry: &AdvancementRegistry) {
                         placed_block_map.entry(0).or_default().push(entry);
                     } else {
                         for block_id in block_ids {
-                            placed_block_map.entry(block_id).or_default().push(entry.clone());
+                            placed_block_map
+                                .entry(block_id)
+                                .or_default()
+                                .push(entry.clone());
                         }
                     }
                 }
@@ -151,19 +187,28 @@ pub fn build_criteria_maps(registry: &AdvancementRegistry) {
                     // Enter block triggers check what block the player entered
                     let block_ids = extract_enter_block_ids(conditions);
                     for block_id in block_ids {
-                        enter_block_map.entry(block_id).or_default().push(entry.clone());
+                        enter_block_map
+                            .entry(block_id)
+                            .or_default()
+                            .push(entry.clone());
                     }
                 }
                 "minecraft:recipe_crafted" => {
                     // Recipe crafted triggers check which recipe was crafted by the player
                     if let Some(recipe_id) = conditions.get("recipe_id").and_then(|v| v.as_str()) {
-                        recipe_crafted_map.entry(recipe_id.to_string()).or_default().push(entry);
+                        recipe_crafted_map
+                            .entry(recipe_id.to_string())
+                            .or_default()
+                            .push(entry);
                     }
                 }
                 "minecraft:crafter_recipe_crafted" => {
                     // Crafter recipe crafted triggers check which recipe was crafted by a crafter block
                     if let Some(recipe_id) = conditions.get("recipe_id").and_then(|v| v.as_str()) {
-                        crafter_recipe_crafted_map.entry(recipe_id.to_string()).or_default().push(entry);
+                        crafter_recipe_crafted_map
+                            .entry(recipe_id.to_string())
+                            .or_default()
+                            .push(entry);
                     }
                 }
                 _ => {
@@ -183,11 +228,22 @@ pub fn build_criteria_maps(registry: &AdvancementRegistry) {
     let placed_block_count: usize = placed_block_map.values().map(|v| v.len()).sum();
     let enter_block_count: usize = enter_block_map.values().map(|v| v.len()).sum();
     let recipe_crafted_count: usize = recipe_crafted_map.values().map(|v| v.len()).sum();
-    let crafter_recipe_crafted_count: usize = crafter_recipe_crafted_map.values().map(|v| v.len()).sum();
+    let crafter_recipe_crafted_count: usize =
+        crafter_recipe_crafted_map.values().map(|v| v.len()).sum();
 
     log::info!(
         "Built advancement trigger maps: inventory_changed={}, changed_dimension={}, consume_item={}, player_killed_entity={}, recipe_unlocked={}, tick={}, location={}, placed_block={}, enter_block={}, recipe_crafted={}, crafter_recipe_crafted={}",
-        item_count, dim_count, consume_count, kill_count, recipe_count, tick_count, location_count, placed_block_count, enter_block_count, recipe_crafted_count, crafter_recipe_crafted_count
+        item_count,
+        dim_count,
+        consume_count,
+        kill_count,
+        recipe_count,
+        tick_count,
+        location_count,
+        placed_block_count,
+        enter_block_count,
+        recipe_crafted_count,
+        crafter_recipe_crafted_count
     );
 
     let _ = ITEM_CRITERIA_MAP.set(RwLock::new(item_map));
@@ -335,7 +391,9 @@ fn extract_location_biomes(conditions: &serde_json::Value) -> Vec<String> {
     if let Some(player_array) = conditions.get("player").and_then(|v| v.as_array()) {
         for condition in player_array {
             // Check if this is an entity_properties condition
-            if condition.get("condition").and_then(|v| v.as_str()) == Some("minecraft:entity_properties") {
+            if condition.get("condition").and_then(|v| v.as_str())
+                == Some("minecraft:entity_properties")
+            {
                 // Look for predicate.location.biomes
                 if let Some(predicate) = condition.get("predicate") {
                     if let Some(location) = predicate.get("location") {
@@ -412,7 +470,8 @@ fn resolve_block_type_id(s: &str) -> Option<u16> {
     }
 }
 
-fn get_dimension_criteria_map() -> &'static RwLock<HashMap<(Option<String>, Option<String>), Vec<(ResourceLocation, String)>>> {
+fn get_dimension_criteria_map()
+-> &'static RwLock<HashMap<(Option<String>, Option<String>), Vec<(ResourceLocation, String)>>> {
     DIMENSION_CRITERIA_MAP.get_or_init(|| RwLock::new(HashMap::new()))
 }
 
@@ -420,7 +479,8 @@ fn get_consume_criteria_map() -> &'static RwLock<HashMap<u16, Vec<(ResourceLocat
     CONSUME_CRITERIA_MAP.get_or_init(|| RwLock::new(HashMap::new()))
 }
 
-fn get_kill_entity_criteria_map() -> &'static RwLock<HashMap<String, Vec<(ResourceLocation, String)>>> {
+fn get_kill_entity_criteria_map()
+-> &'static RwLock<HashMap<String, Vec<(ResourceLocation, String)>>> {
     KILL_ENTITY_CRITERIA_MAP.get_or_init(|| RwLock::new(HashMap::new()))
 }
 
@@ -432,23 +492,28 @@ fn get_tick_criteria_map() -> &'static RwLock<Vec<(ResourceLocation, String)>> {
     TICK_CRITERIA_MAP.get_or_init(|| RwLock::new(Vec::new()))
 }
 
-fn get_location_biome_criteria_map() -> &'static RwLock<HashMap<String, Vec<(ResourceLocation, String)>>> {
+fn get_location_biome_criteria_map()
+-> &'static RwLock<HashMap<String, Vec<(ResourceLocation, String)>>> {
     LOCATION_BIOME_CRITERIA_MAP.get_or_init(|| RwLock::new(HashMap::new()))
 }
 
-fn get_placed_block_criteria_map() -> &'static RwLock<HashMap<u16, Vec<(ResourceLocation, String)>>> {
+fn get_placed_block_criteria_map() -> &'static RwLock<HashMap<u16, Vec<(ResourceLocation, String)>>>
+{
     PLACED_BLOCK_CRITERIA_MAP.get_or_init(|| RwLock::new(HashMap::new()))
 }
 
-fn get_enter_block_criteria_map() -> &'static RwLock<HashMap<u16, Vec<(ResourceLocation, String)>>> {
+fn get_enter_block_criteria_map() -> &'static RwLock<HashMap<u16, Vec<(ResourceLocation, String)>>>
+{
     ENTER_BLOCK_CRITERIA_MAP.get_or_init(|| RwLock::new(HashMap::new()))
 }
 
-fn get_recipe_crafted_criteria_map() -> &'static RwLock<HashMap<String, Vec<(ResourceLocation, String)>>> {
+fn get_recipe_crafted_criteria_map()
+-> &'static RwLock<HashMap<String, Vec<(ResourceLocation, String)>>> {
     RECIPE_CRAFTED_CRITERIA_MAP.get_or_init(|| RwLock::new(HashMap::new()))
 }
 
-fn get_crafter_recipe_crafted_criteria_map() -> &'static RwLock<HashMap<String, Vec<(ResourceLocation, String)>>> {
+fn get_crafter_recipe_crafted_criteria_map()
+-> &'static RwLock<HashMap<String, Vec<(ResourceLocation, String)>>> {
     CRAFTER_RECIPE_CRAFTED_CRITERIA_MAP.get_or_init(|| RwLock::new(HashMap::new()))
 }
 
@@ -523,7 +588,11 @@ pub async fn check_inventory_for_advancements(player: &Arc<Player>) {
 /// 1. Updates the player's advancement tracker
 /// 2. Only sends a packet if the criterion was newly granted (prevents duplicate toasts)
 /// 3. Saves progress to disk when an advancement is completed
-async fn grant_criterion(player: &Arc<Player>, advancement_id: &ResourceLocation, criterion_name: &str) {
+async fn grant_criterion(
+    player: &Arc<Player>,
+    advancement_id: &ResourceLocation,
+    criterion_name: &str,
+) {
     // Grant the criterion in the player's tracker
     // This returns true only if the criterion was newly granted
     let (newly_granted, is_complete) = {
@@ -554,9 +623,7 @@ async fn grant_criterion(player: &Arc<Player>, advancement_id: &ResourceLocation
 
     let criterion = CriterionProgressMapping {
         criterion: criterion_name,
-        progress: CriterionProgress {
-            obtained_time,
-        },
+        progress: CriterionProgress { obtained_time },
     };
 
     let criteria = [criterion];
@@ -573,11 +640,11 @@ async fn grant_criterion(player: &Arc<Player>, advancement_id: &ResourceLocation
 
     // Send incremental update (reset=false, no new advancements, just progress)
     let packet = CUpdateAdvancements::new(
-        false,        // Don't reset
-        &[],          // No new advancements
-        &[],          // No removals
+        false, // Don't reset
+        &[],   // No new advancements
+        &[],   // No removals
         &progress_mappings,
-        true,         // Show toast
+        true, // Show toast
     );
 
     player.client.enqueue_packet(&packet).await;
@@ -714,13 +781,12 @@ pub async fn on_tick(player: &Arc<Player>) {
 pub async fn on_location(player: &Arc<Player>) {
     // Get player's current position and biome
     let pos = player.living_entity.entity.pos.load();
-    let block_pos = pumpkin_util::math::position::BlockPos(
-        pumpkin_util::math::vector3::Vector3::new(
+    let block_pos =
+        pumpkin_util::math::position::BlockPos(pumpkin_util::math::vector3::Vector3::new(
             pos.x.floor() as i32,
             pos.y.floor() as i32,
             pos.z.floor() as i32,
-        ),
-    );
+        ));
 
     let world = player.world();
     let biome = world.level.get_rough_biome(&block_pos).await;

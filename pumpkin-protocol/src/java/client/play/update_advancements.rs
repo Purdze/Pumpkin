@@ -3,13 +3,13 @@ use std::io::Write;
 use pumpkin_data::packet::clientbound::PLAY_UPDATE_ADVANCEMENTS;
 use pumpkin_macros::java_packet;
 use pumpkin_nbt::serializer::Serializer as NbtSerializer;
-use pumpkin_util::{resource_location::ResourceLocation, text::TextComponent};
 use pumpkin_util::version::MinecraftVersion;
+use pumpkin_util::{resource_location::ResourceLocation, text::TextComponent};
 use serde::Serialize;
 
-use crate::{ClientPacket, WritingError, ser::NetworkWriteExt};
 use crate::codec::item_stack_seralizer::ItemStackSerializer;
 use crate::ser::serializer::Serializer as ProtocolSerializer;
+use crate::{ClientPacket, WritingError, ser::NetworkWriteExt};
 
 /// Updates advancement progress and unlocked advancements for the client.
 ///
@@ -32,7 +32,8 @@ pub struct CUpdateAdvancements<'a> {
 }
 
 impl<'a> CUpdateAdvancements<'a> {
-    pub fn new(
+    #[must_use]
+    pub const fn new(
         reset: bool,
         advancements: &'a [AdvancementMapping<'a>],
         remove_identifiers: &'a [ResourceLocation],
@@ -107,16 +108,13 @@ pub struct Advancement<'a> {
 }
 
 impl Advancement<'_> {
+    #[expect(clippy::redundant_closure_for_method_calls)]
     fn write_to(&self, write: &mut impl Write) -> Result<(), WritingError> {
         // Parent (optional)
-        write.write_option(&self.parent, |w, parent| {
-            w.write_resource_location(parent)
-        })?;
+        write.write_option(&self.parent, |w, parent| w.write_resource_location(parent))?;
 
         // Display (optional)
-        write.write_option(&self.display, |w, display| {
-            display.write_to(w)
-        })?;
+        write.write_option(&self.display, |w, display| display.write_to(w))?;
 
         // Requirements - array of arrays of criterion names (no criteria field!)
         write.write_list(self.requirements, |w, requirement| {
@@ -156,6 +154,7 @@ pub struct AdvancementDisplay<'a> {
 }
 
 impl AdvancementDisplay<'_> {
+    #[expect(clippy::semicolon_outside_block)]
     fn write_to(&self, write: &mut impl Write) -> Result<(), WritingError> {
         // Title (Chat/TextComponent as NBT)
         {

@@ -5,19 +5,18 @@ use std::collections::{HashMap, HashSet};
 use std::path::Path;
 use std::sync::Arc;
 
-use std::sync::RwLock;
 use pumpkin_protocol::codec::item_stack_seralizer::ItemStackSerializer;
 use pumpkin_protocol::java::client::play::{
-    Advancement, AdvancementDisplay, AdvancementFrameType, AdvancementMapping,
-    AdvancementProgress, AdvancementProgressMapping, CUpdateAdvancements, CriterionProgress,
-    CriterionProgressMapping,
+    Advancement, AdvancementDisplay, AdvancementFrameType, AdvancementMapping, AdvancementProgress,
+    AdvancementProgressMapping, CUpdateAdvancements, CriterionProgress, CriterionProgressMapping,
 };
 use pumpkin_util::resource_location::ResourceLocation;
 use pumpkin_util::text::TextComponent;
 use pumpkin_world::item::ItemStack;
+use std::sync::RwLock;
 use uuid::Uuid;
 
-use super::{storage, AdvancementData, AdvancementProgressData, AdvancementRegistry, flags};
+use super::{AdvancementData, AdvancementProgressData, AdvancementRegistry, flags, storage};
 use crate::entity::player::Player;
 
 /// Tracks advancement progress for a single player.
@@ -75,9 +74,7 @@ impl PlayerAdvancementTracker {
                 let registry = self.registry.read().unwrap();
                 registry
                     .get(advancement_id)
-                    .is_some_and(|advancement| {
-                        progress.is_done(&advancement.requirements)
-                    })
+                    .is_some_and(|advancement| progress.is_done(&advancement.requirements))
             };
             if is_complete {
                 // Advancement completed!
@@ -89,7 +86,7 @@ impl PlayerAdvancementTracker {
     }
 
     /// Called when an advancement is completed.
-    #[allow(clippy::unused_self)]
+    #[allow(clippy::unused_self, clippy::missing_const_for_fn)]
     fn on_advancement_complete(&self, _advancement_id: &ResourceLocation) {
         // TODO: Apply rewards, announce to chat, etc.
     }
@@ -107,7 +104,10 @@ impl PlayerAdvancementTracker {
 
     /// Gets progress for an advancement.
     #[must_use]
-    pub fn get_progress(&self, advancement_id: &ResourceLocation) -> Option<&AdvancementProgressData> {
+    pub fn get_progress(
+        &self,
+        advancement_id: &ResourceLocation,
+    ) -> Option<&AdvancementProgressData> {
         self.progress.get(advancement_id)
     }
 
@@ -159,7 +159,8 @@ impl PlayerAdvancementTracker {
                 .collect()
         };
 
-        if let Err(e) = storage::save_progress(world_path, player_uuid, &self.progress, &requirements)
+        if let Err(e) =
+            storage::save_progress(world_path, player_uuid, &self.progress, &requirements)
         {
             log::error!("Failed to save advancement progress for {player_uuid}: {e}");
         }
@@ -281,9 +282,7 @@ impl PlayerAdvancementTracker {
                 criteria: prog
                     .criteria
                     .iter()
-                    .filter_map(|(name, time)| {
-                        time.map(|t| (name.clone(), t))
-                    })
+                    .filter_map(|(name, time)| time.map(|t| (name.clone(), t)))
                     .collect(),
             })
             .collect()
@@ -331,6 +330,7 @@ pub async fn send_advancements(player: &Arc<Player>) {
         .living_entity
         .entity
         .world
+        .load()
         .level
         .level_folder
         .root_folder
@@ -340,7 +340,7 @@ pub async fn send_advancements(player: &Arc<Player>) {
     {
         let mut tracker = player.advancement_tracker.write().await;
         tracker.load_progress(&world_path, player_uuid);
-    }
+    };
 
     // Check current inventory for any advancement triggers
     // This handles items the player had before disconnecting
@@ -357,6 +357,7 @@ pub async fn save_advancements(player: &Arc<Player>) {
         .living_entity
         .entity
         .world
+        .load()
         .level
         .level_folder
         .root_folder
@@ -399,7 +400,10 @@ async fn send_loaded_advancements(player: &Arc<Player>) {
         let progress: HashMap<ResourceLocation, super::AdvancementProgressData> = advancements
             .iter()
             .filter_map(|adv| {
-                tracker.get_progress(&adv.id).cloned().map(|p| (adv.id.clone(), p))
+                tracker
+                    .get_progress(&adv.id)
+                    .cloned()
+                    .map(|p| (adv.id.clone(), p))
             })
             .collect();
 
@@ -415,38 +419,48 @@ async fn send_loaded_advancements(player: &Arc<Player>) {
     let prepared: Vec<PreparedAdvancement> = advancements_data
         .iter()
         .map(|adv| {
-            let (title, description, icon, frame, background, show_toast, hidden, x, y, has_display) =
-                adv.display.as_ref().map_or_else(
-                    || {
-                        // Hidden advancement (no display) - use defaults
-                        (
-                            TextComponent::text(""),
-                            TextComponent::text(""),
-                            ItemStack::new(1, &pumpkin_data::item::Item::AIR),
-                            super::AdvancementFrame::Task,
-                            None,
-                            false,
-                            true,
-                            0.0,
-                            0.0,
-                            false,
-                        )
-                    },
-                    |d| {
-                        (
-                            d.title.clone(),
-                            d.description.clone(),
-                            d.icon.clone(),
-                            d.frame,
-                            d.background.clone(),
-                            d.show_toast,
-                            d.hidden,
-                            d.x,
-                            d.y,
-                            true,
-                        )
-                    },
-                );
+            let (
+                title,
+                description,
+                icon,
+                frame,
+                background,
+                show_toast,
+                hidden,
+                x,
+                y,
+                has_display,
+            ) = adv.display.as_ref().map_or_else(
+                || {
+                    // Hidden advancement (no display) - use defaults
+                    (
+                        TextComponent::text(""),
+                        TextComponent::text(""),
+                        ItemStack::new(1, &pumpkin_data::item::Item::AIR),
+                        super::AdvancementFrame::Task,
+                        None,
+                        false,
+                        true,
+                        0.0,
+                        0.0,
+                        false,
+                    )
+                },
+                |d| {
+                    (
+                        d.title.clone(),
+                        d.description.clone(),
+                        d.icon.clone(),
+                        d.frame,
+                        d.background.clone(),
+                        d.show_toast,
+                        d.hidden,
+                        d.x,
+                        d.y,
+                        true,
+                    )
+                },
+            );
 
             PreparedAdvancement {
                 id: adv.id.clone(),
@@ -540,44 +554,44 @@ async fn send_loaded_advancements(player: &Arc<Player>) {
         .iter()
         .filter_map(|p| {
             let prog = progress_snapshot.get(&p.id)?;
-            if prog.is_any_obtained() {
-                Some((p.id.clone(), prog.clone()))
-            } else {
-                None
-            }
+            prog.is_any_obtained().then(|| (p.id.clone(), prog.clone()))
         })
         .collect();
 
     // Build criterion progress for each advancement with progress
     let criterion_progress: Vec<Vec<CriterionProgressMapping>> = progress_data
         .iter()
-        .map(|(_, prog): &(ResourceLocation, super::AdvancementProgressData)| {
-            prog.criteria
-                .iter()
-                .filter_map(|(name, time): (&String, &Option<i64>)| {
-                    time.map(|t| CriterionProgressMapping {
-                        criterion: name.as_str(),
-                        progress: CriterionProgress {
-                            obtained_time: Some(t),
-                        },
+        .map(
+            |(_, prog): &(ResourceLocation, super::AdvancementProgressData)| {
+                prog.criteria
+                    .iter()
+                    .filter_map(|(name, time): (&String, &Option<i64>)| {
+                        time.map(|t| CriterionProgressMapping {
+                            criterion: name.as_str(),
+                            progress: CriterionProgress {
+                                obtained_time: Some(t),
+                            },
+                        })
                     })
-                })
-                .collect()
-        })
+                    .collect()
+            },
+        )
         .collect();
 
     // Build progress mappings - create AdvancementProgress inline to avoid clone
     let progress: Vec<AdvancementProgressMapping> = progress_data
         .iter()
         .enumerate()
-        .map(|(i, (id, _)): (usize, &(ResourceLocation, super::AdvancementProgressData))| {
-            AdvancementProgressMapping {
-                id: id.clone(),
-                progress: AdvancementProgress {
-                    criteria: &criterion_progress[i],
-                },
-            }
-        })
+        .map(
+            |(i, (id, _)): (usize, &(ResourceLocation, super::AdvancementProgressData))| {
+                AdvancementProgressMapping {
+                    id: id.clone(),
+                    progress: AdvancementProgress {
+                        criteria: &criterion_progress[i],
+                    },
+                }
+            },
+        )
         .collect();
 
     let packet = CUpdateAdvancements::new(true, &advancements, &[], &progress, false);

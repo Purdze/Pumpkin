@@ -17,7 +17,8 @@ pub struct CSelectAdvancementTab {
 }
 
 impl CSelectAdvancementTab {
-    pub fn new(tab_id: Option<ResourceLocation>) -> Self {
+    #[must_use]
+    pub const fn new(tab_id: Option<ResourceLocation>) -> Self {
         Self { tab_id }
     }
 }

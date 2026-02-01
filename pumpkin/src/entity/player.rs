@@ -364,7 +364,8 @@ pub struct Player {
     /// Manages the player's hunger level.
     pub hunger_manager: HungerManager,
     /// Tracks advancement progress for this player.
-    pub advancement_tracker: Arc<tokio::sync::RwLock<crate::advancement::tracker::PlayerAdvancementTracker>>,
+    pub advancement_tracker:
+        Arc<tokio::sync::RwLock<crate::advancement::tracker::PlayerAdvancementTracker>>,
     /// The ID of the currently open container (if any).
     pub open_container: AtomicCell<Option<u64>>,
     /// The item currently being held by the player.
@@ -3372,7 +3373,7 @@ impl InventoryPlayer for Player {
     fn on_recipe_crafted<'a>(&'a self, recipe_id: &'a str) -> PlayerFuture<'a, ()> {
         Box::pin(async move {
             // Get Arc reference to self for the trigger
-            if let Some(player) = self.world().get_player_by_id(self.entity_id()).await {
+            if let Some(player) = self.world().get_player_by_id(self.entity_id()) {
                 crate::advancement::trigger::on_recipe_crafted(&player, recipe_id).await;
             }
         })
