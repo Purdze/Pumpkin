@@ -331,11 +331,20 @@ impl ChunkManager {
     }
 
     pub fn next_chunk(&mut self) -> Box<[SyncChunk]> {
-        let mut chunk_size = self.chunk_queue.len().min(self.chunks_per_tick.max(1));
-        let mut chunks = Vec::<Arc<ChunkData>>::with_capacity(chunk_size);
-        while chunk_size > 0 {
-            chunks.push(self.chunk_queue.pop().unwrap().2);
-            chunk_size -= 1;
+        let max_chunks = self.chunk_queue.len().min(self.chunks_per_tick.max(1));
+        let view_distance_i32 = i32::from(self.view_distance);
+        let mut chunks = Vec::<Arc<ChunkData>>::with_capacity(max_chunks);
+        while chunks.len() < max_chunks {
+            let Some(node) = self.chunk_queue.pop() else {
+                break;
+            };
+            let dst = (node.1.x - self.center.x)
+                .abs()
+                .max((node.1.y - self.center.y).abs());
+            if dst > view_distance_i32 {
+                continue;
+            }
+            chunks.push(node.2);
         }
         match &mut self.batches_sent_since_ack {
             BatchState::Count(count) => {

@@ -16,6 +16,7 @@ pub struct HeterogeneousPaletteData<V: Hash + Eq + Copy, const DIM: usize> {
     cube: Box<AbstractCube<V, DIM>>,
     palette: Vec<V>,
     counts: Vec<u16>,
+    index_map: HashMap<V, usize>,
 }
 
 impl<V: Hash + Eq + Copy, const DIM: usize> HeterogeneousPaletteData<V, DIM> {
@@ -34,24 +35,30 @@ impl<V: Hash + Eq + Copy, const DIM: usize> HeterogeneousPaletteData<V, DIM> {
         debug_assert!(z < DIM);
 
         let original = self.cube[y][z][x];
-        let original_index = self.palette.iter().position(|v| v == &original).unwrap();
+        let original_index = *self.index_map.get(&original).unwrap();
         self.counts[original_index] -= 1;
 
         if self.counts[original_index] == 0 {
-            // Remove from palette and counts Vecs if the count hits zero.
+            self.index_map.remove(&original);
             self.palette.swap_remove(original_index);
             self.counts.swap_remove(original_index);
+            if original_index < self.palette.len() {
+                self.index_map
+                    .insert(self.palette[original_index], original_index);
+            }
         }
 
         // Set the new value in the cube
         self.cube[y][z][x] = value;
 
         // Find or add the new value to the palette.
-        if let Some(new_index) = self.palette.iter().position(|v| v == &value) {
+        if let Some(&new_index) = self.index_map.get(&value) {
             self.counts[new_index] += 1;
         } else {
+            let new_index = self.palette.len();
             self.palette.push(value);
             self.counts.push(1);
+            self.index_map.insert(value, new_index);
         }
 
         original
@@ -73,14 +80,17 @@ impl<V: Hash + Eq + Copy + Default, const DIM: usize> PalettedContainer<V, DIM> 
     fn from_cube(cube: Box<AbstractCube<V, DIM>>) -> Self {
         let mut palette: Vec<V> = Vec::new();
         let mut counts: Vec<u16> = Vec::new();
+        let mut index_map: HashMap<V, usize> = HashMap::new();
 
         // Iterate over the flattened cube to populate the palette and counts
         for val in cube.as_flattened().as_flattened() {
-            if let Some(index) = palette.iter().position(|v| v == val) {
+            if let Some(&index) = index_map.get(val) {
                 // Value already exists, increment its count
                 counts[index] += 1;
             } else {
                 // New value, add it to the palette and start its count
+                let index = palette.len();
+                index_map.insert(*val, index);
                 palette.push(*val);
                 counts.push(1);
             }
@@ -95,6 +105,7 @@ impl<V: Hash + Eq + Copy + Default, const DIM: usize> PalettedContainer<V, DIM> 
                 cube,
                 palette,
                 counts,
+                index_map,
             }))
         }
     }
@@ -113,7 +124,6 @@ impl<V: Hash + Eq + Copy + Default, const DIM: usize> PalettedContainer<V, DIM> 
                 debug_assert!(bits_per_entry >= encompassing_bits(data.counts.len()));
                 debug_assert!(bits_per_entry <= 15);
 
-                // Don't use HashMap's here, because its slow
                 let blocks_per_i64 = 64 / bits_per_entry;
 
                 let packed_indices: Box<[i64]> = data
@@ -123,7 +133,7 @@ impl<V: Hash + Eq + Copy + Default, const DIM: usize> PalettedContainer<V, DIM> 
                     .chunks(blocks_per_i64 as usize)
                     .map(|chunk| {
                         chunk.iter().enumerate().fold(0, |acc, (index, key)| {
-                            let key_index = data.palette.iter().position(|&x| x == *key).unwrap();
+                            let key_index = *data.index_map.get(key).unwrap();
                             debug_assert!((1 << bits_per_entry) > key_index);
 
                             let packed_offset_index =
@@ -187,16 +197,14 @@ impl<V: Hash + Eq + Copy + Default, const DIM: usize> PalettedContainer<V, DIM> 
             decompressed_values.push(value);
         }
 
-        // Now, with all decompressed values, build the counts.
-        let mut counts = vec![0; palette.len()];
+        let index_map: HashMap<V, usize> =
+            palette.iter().enumerate().map(|(i, v)| (*v, i)).collect();
 
+        let mut counts = vec![0u16; palette.len()];
         for &value in &decompressed_values {
-            // This is the key optimization: find the index in the palette Vec
-            // and increment the corresponding count.
-            if let Some(index) = palette.iter().position(|v| v == &value) {
+            if let Some(&index) = index_map.get(&value) {
                 counts[index] += 1;
             } else {
-                // This case should ideally not happen if the palette is complete.
                 warn!("Decompressed value not found in palette!");
             }
         }
@@ -210,6 +218,7 @@ impl<V: Hash + Eq + Copy + Default, const DIM: usize> PalettedContainer<V, DIM> 
             cube,
             palette,
             counts,
+            index_map,
         }))
     }
 

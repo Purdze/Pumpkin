@@ -204,9 +204,7 @@ impl Level {
             chunk_listener: listener.clone(),
         });
 
-        // TODO
-        let total_cores = num_cpus::get().saturating_sub(2).max(1);
-        let threads_per_dimension = (total_cores / 2).max(1);
+        let threads_per_dimension = num_cpus::get().saturating_sub(3).max(1);
         let entity_threads = (threads_per_dimension / 2).max(1);
 
         GenerationSchedule::create(

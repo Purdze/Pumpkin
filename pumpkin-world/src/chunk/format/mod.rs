@@ -72,6 +72,7 @@ impl Dirtiable for ChunkData {
         self.dirty.store(flag, Ordering::Relaxed);
 
         if flag {
+            *self.network_cache.lock().unwrap() = None;
             return;
         }
 
@@ -162,8 +163,8 @@ impl ChunkData {
         let min_y = section_coords::section_to_block(chunk_data.min_y_section);
         let section = ChunkSections {
             count: block_palettes.len(),
-            block_sections: RwLock::new(block_palettes.into_boxed_slice()),
-            biome_sections: RwLock::new(biome_palettes.into_boxed_slice()),
+            block_sections: block_palettes.into_iter().map(RwLock::new).collect(),
+            biome_sections: biome_palettes.into_iter().map(RwLock::new).collect(),
             min_y,
         };
         Ok(Self {
@@ -188,6 +189,7 @@ impl ChunkData {
             light_engine: std::sync::Mutex::new(light_engine),
             light_populated: AtomicBool::new(chunk_data.light_correct),
             status: chunk_data.status,
+            network_cache: std::sync::Mutex::new(None),
         })
     }
 
@@ -198,15 +200,15 @@ impl ChunkData {
 
         let sections = {
             let light_lock = self.light_engine.lock().unwrap();
-            let block_lock = self.section.block_sections.read().unwrap();
-            let biome_lock = self.section.biome_sections.read().unwrap();
             let min_section_y = (self.section.min_y >> 4) as i8;
 
             (0..self.section.count)
                 .map(|i| ChunkSectionNBT {
                     y: i as i8 + min_section_y,
-                    block_states: Some(block_lock[i].to_disk_nbt()),
-                    biomes: Some(biome_lock[i].to_disk_nbt()),
+                    block_states: Some(
+                        self.section.block_sections[i].read().unwrap().to_disk_nbt(),
+                    ),
+                    biomes: Some(self.section.biome_sections[i].read().unwrap().to_disk_nbt()),
 
                     block_light: match light_lock.block_light.get(i) {
                         Some(LightContainer::Empty(default)) if *default == 0 => None,

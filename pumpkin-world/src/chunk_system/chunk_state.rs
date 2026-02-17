@@ -195,6 +195,7 @@ impl Chunk {
                 light_populated: AtomicBool::new(false),
                 status: ChunkStatus::Empty,
                 dirty: AtomicBool::new(false),
+                network_cache: std::sync::Mutex::new(None),
             })),
         ) {
             Chunk::Proto(proto) => proto,
@@ -213,12 +214,8 @@ impl Chunk {
             let section_index = y_offset as usize / 4;
             let relative_y = y_offset as usize % 4;
 
-            if let Some(section) = sections
-                .biome_sections
-                .write()
-                .unwrap()
-                .get_mut(section_index)
-            {
+            if let Some(section_lock) = sections.biome_sections.get(section_index) {
+                let section = &mut *section_lock.write().unwrap();
                 let absolute_biome_y = biome_min_y + y_offset;
 
                 for z in 0..4 {
@@ -236,12 +233,8 @@ impl Chunk {
             let section_index = (y_offset as usize) / 16;
             let relative_y = (y_offset as usize) % 16;
 
-            if let Some(section) = sections
-                .block_sections
-                .write()
-                .unwrap()
-                .get_mut(section_index)
-            {
+            if let Some(section_lock) = sections.block_sections.get(section_index) {
+                let section = &mut *section_lock.write().unwrap();
                 for z in 0..16 {
                     for x in 0..16 {
                         let block =
@@ -273,6 +266,7 @@ impl Chunk {
             fluid_ticks: Default::default(),
             block_entities: Default::default(),
             status: proto_chunk.stage.into(),
+            network_cache: std::sync::Mutex::new(None),
         };
 
         chunk.heightmap = Mutex::new(chunk.calculate_heightmap());

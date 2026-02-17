@@ -253,10 +253,8 @@ impl ProtoChunk {
         let section_data = &chunk_data.section;
         let heightmap_data = chunk_data.heightmap.lock().unwrap();
 
-        let block_sections_guard = section_data.block_sections.read().unwrap();
-        let biome_sections_guard = section_data.biome_sections.read().unwrap();
-
-        for (section_idx, block_palette) in block_sections_guard.iter().enumerate() {
+        for (section_idx, block_lock) in section_data.block_sections.iter().enumerate() {
+            let block_palette = block_lock.read().unwrap();
             let section_base_y = section_idx as i32 * 16;
 
             if section_base_y >= proto_chunk.height() as i32 {
@@ -274,8 +272,10 @@ impl ProtoChunk {
                     }
                 }
             }
+            drop(block_palette);
 
-            if let Some(biome_palette) = biome_sections_guard.get(section_idx) {
+            if let Some(biome_lock) = section_data.biome_sections.get(section_idx) {
+                let biome_palette = biome_lock.read().unwrap();
                 for x in 0..4 {
                     for y in 0..4 {
                         for z in 0..4 {
@@ -295,9 +295,6 @@ impl ProtoChunk {
                 }
             }
         }
-        drop(block_sections_guard);
-        drop(biome_sections_guard);
-
         for z in 0..16 {
             for x in 0..16 {
                 let index = ((z << 4) + x) as usize;

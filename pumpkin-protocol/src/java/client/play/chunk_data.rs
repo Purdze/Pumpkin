@@ -19,42 +19,45 @@ use std::io::Write;
 #[java_packet(PLAY_LEVEL_CHUNK_WITH_LIGHT)]
 pub struct CChunkData<'a>(pub &'a ChunkData);
 
-impl ClientPacket for CChunkData<'_> {
+impl CChunkData<'_> {
     #[expect(clippy::too_many_lines)]
-    fn write_packet_data(
-        &self,
-        write: impl Write,
-        version: &MinecraftVersion,
-    ) -> Result<(), WritingError> {
-        let mut write = write;
+    fn serialize_packet_data(&self, version: &MinecraftVersion) -> Result<Vec<u8>, WritingError> {
+        let mut buf = Vec::new();
 
         // Chunk X
-        write.write_i32_be(self.0.x)?;
+        buf.write_i32_be(self.0.x)?;
         // Chunk Z
-        write.write_i32_be(self.0.z)?;
+        buf.write_i32_be(self.0.z)?;
 
         let heightmaps = &self.0.heightmap.lock().unwrap();
-        write.write_var_int(&VarInt(3))?; // Map size
+        buf.write_var_int(&VarInt(3))?; // Map size
 
-        let mut write_heightmap = |index: i32, data: &[i64]| -> Result<(), WritingError> {
-            write.write_var_int(&VarInt(index))?;
-            write.write_var_int(&VarInt(data.len() as i32))?;
-            for val in data {
-                write.write_i64_be(*val)?;
-            }
-            Ok(())
-        };
+        let write_heightmap =
+            |buf: &mut Vec<u8>, index: i32, data: &[i64]| -> Result<(), WritingError> {
+                buf.write_var_int(&VarInt(index))?;
+                buf.write_var_int(&VarInt(data.len() as i32))?;
+                for val in data {
+                    buf.write_i64_be(*val)?;
+                }
+                Ok(())
+            };
 
-        write_heightmap(1, &heightmaps.world_surface)?;
-        write_heightmap(4, &heightmaps.motion_blocking)?;
-        write_heightmap(5, &heightmaps.motion_blocking_no_leaves)?;
+        write_heightmap(&mut buf, 1, &heightmaps.world_surface)?;
+        write_heightmap(&mut buf, 4, &heightmaps.motion_blocking)?;
+        write_heightmap(&mut buf, 5, &heightmaps.motion_blocking_no_leaves)?;
 
         {
             let mut blocks_and_biomes_buf = Vec::new();
-            let block_sections = self.0.section.block_sections.read().unwrap();
-            let biome_sections = self.0.section.biome_sections.read().unwrap();
 
-            for (block_palette, biome_palette) in block_sections.iter().zip(biome_sections.iter()) {
+            for (block_lock, biome_lock) in self
+                .0
+                .section
+                .block_sections
+                .iter()
+                .zip(self.0.section.biome_sections.iter())
+            {
+                let block_palette = block_lock.read().unwrap();
+                let biome_palette = biome_lock.read().unwrap();
                 let non_empty_block_count = block_palette.non_air_block_count() as i16;
                 blocks_and_biomes_buf.write_i16_be(non_empty_block_count)?;
 
@@ -140,29 +143,29 @@ impl ClientPacket for CChunkData<'_> {
                 }
             }
 
-            write.write_var_int(&blocks_and_biomes_buf.len().try_into().map_err(|_| {
+            buf.write_var_int(&blocks_and_biomes_buf.len().try_into().map_err(|_| {
                 WritingError::Message(format!(
                     "{} is not representable as a VarInt!",
                     blocks_and_biomes_buf.len()
                 ))
             })?)?;
-            write.write_slice(&blocks_and_biomes_buf)?;
+            buf.write_slice(&blocks_and_biomes_buf)?;
         };
 
         let block_entities = self.0.block_entities.lock().unwrap();
-        write.write_var_int(&VarInt(block_entities.len() as i32))?;
+        buf.write_var_int(&VarInt(block_entities.len() as i32))?;
         for block_entity in block_entities.values() {
             let pos = block_entity.get_position();
             let local_xz = ((get_local_cord(pos.0.x) & 0xF) << 4) | (get_local_cord(pos.0.z) & 0xF);
 
-            write.write_u8(local_xz as u8)?;
-            write.write_i16_be(pos.0.y as i16)?;
-            write.write_var_int(&VarInt(block_entity.get_id() as i32))?;
+            buf.write_u8(local_xz as u8)?;
+            buf.write_i16_be(pos.0.y as i16)?;
+            buf.write_var_int(&VarInt(block_entity.get_id() as i32))?;
 
             if let Some(nbt) = block_entity.chunk_data_nbt() {
-                write.write_nbt(nbt.into())?;
+                buf.write_nbt(nbt.into())?;
             } else {
-                write.write_u8(END_ID)?;
+                buf.write_u8(END_ID)?;
             }
         }
 
@@ -203,38 +206,66 @@ impl ClientPacket for CChunkData<'_> {
             block_light_empty_mask |= 1 << (num_sections + 1);
 
             // Write Sky Light Mask
-            write.write_bitset(&BitSet(Box::new([sky_light_mask.try_into().unwrap()])))?;
+            buf.write_bitset(&BitSet(Box::new([sky_light_mask.try_into().unwrap()])))?;
             // Write Block Light Mask
-            write.write_bitset(&BitSet(Box::new([block_light_mask.try_into().unwrap()])))?;
+            buf.write_bitset(&BitSet(Box::new([block_light_mask.try_into().unwrap()])))?;
             // Write Empty Sky Light Mask
-            write.write_bitset(&BitSet(Box::new([sky_light_empty_mask
+            buf.write_bitset(&BitSet(Box::new([sky_light_empty_mask
                 .try_into()
                 .unwrap()])))?;
             // Write Empty Block Light Mask
-            write.write_bitset(&BitSet(Box::new([block_light_empty_mask
+            buf.write_bitset(&BitSet(Box::new([block_light_empty_mask
                 .try_into()
                 .unwrap()])))?;
 
             let light_data_size: VarInt = LightContainer::ARRAY_SIZE.try_into().unwrap();
 
             // Write Sky Light arrays
-            write.write_var_int(&VarInt(sky_light_mask.count_ones() as i32))?;
+            buf.write_var_int(&VarInt(sky_light_mask.count_ones() as i32))?;
             for section_index in 0..num_sections {
                 if let LightContainer::Full(data) = &light_engine.sky_light[section_index] {
-                    write.write_var_int(&light_data_size)?;
-                    write.write_slice(data.as_ref())?;
+                    buf.write_var_int(&light_data_size)?;
+                    buf.write_slice(data.as_ref())?;
                 }
             }
 
             // Write Block Light arrays
-            write.write_var_int(&VarInt(block_light_mask.count_ones() as i32))?;
+            buf.write_var_int(&VarInt(block_light_mask.count_ones() as i32))?;
             for section_index in 0..num_sections {
                 if let LightContainer::Full(data) = &light_engine.block_light[section_index] {
-                    write.write_var_int(&light_data_size)?;
-                    write.write_slice(data.as_ref())?;
+                    buf.write_var_int(&light_data_size)?;
+                    buf.write_slice(data.as_ref())?;
                 }
             }
         }
+        Ok(buf)
+    }
+}
+
+impl ClientPacket for CChunkData<'_> {
+    fn write_packet_data(
+        &self,
+        write: impl Write,
+        version: &MinecraftVersion,
+    ) -> Result<(), WritingError> {
+        let mut write = write;
+
+        {
+            let cache = self.0.network_cache.lock().unwrap();
+            if let Some((cached_version, cached_bytes)) = cache.as_ref() {
+                if cached_version == version {
+                    write.write_slice(cached_bytes)?;
+                    return Ok(());
+                }
+            }
+        }
+
+        let serialized = self.serialize_packet_data(version)?;
+        write.write_slice(&serialized)?;
+
+        let mut cache = self.0.network_cache.lock().unwrap();
+        *cache = Some((*version, serialized.into_boxed_slice()));
+
         Ok(())
     }
 }
