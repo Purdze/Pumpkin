@@ -73,6 +73,9 @@ impl Dirtiable for ChunkData {
 
         if flag {
             self.network_cache.lock().unwrap().clear();
+            self.section
+                .dirty_sections
+                .store(u32::MAX, Ordering::Relaxed);
             return;
         }
 
@@ -161,11 +164,13 @@ impl ChunkData {
 
         // Assemble the ChunkSections
         let min_y = section_coords::section_to_block(chunk_data.min_y_section);
+        let count = block_palettes.len();
         let section = ChunkSections {
-            count: block_palettes.len(),
+            count,
             block_sections: block_palettes.into_iter().map(RwLock::new).collect(),
             biome_sections: biome_palettes.into_iter().map(RwLock::new).collect(),
             min_y,
+            dirty_sections: std::sync::atomic::AtomicU32::new(u32::MAX),
         };
         Ok(Self {
             section,
@@ -190,6 +195,7 @@ impl ChunkData {
             light_populated: AtomicBool::new(chunk_data.light_correct),
             status: chunk_data.status,
             network_cache: Default::default(),
+            section_cache: std::sync::Mutex::new(vec![None; count].into_boxed_slice()),
         })
     }
 

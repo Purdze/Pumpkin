@@ -196,6 +196,7 @@ impl Chunk {
                 status: ChunkStatus::Empty,
                 dirty: AtomicBool::new(false),
                 network_cache: Default::default(),
+                section_cache: Default::default(),
             })),
         ) {
             Chunk::Proto(proto) => proto,
@@ -257,6 +258,7 @@ impl Chunk {
         let mut chunk = ChunkData {
             light_engine: Mutex::new(light_data),
             light_populated: AtomicBool::new(is_lit),
+            section_cache: std::sync::Mutex::new(vec![None; total_sections].into_boxed_slice()),
             section: sections,
             heightmap: Default::default(),
             x: proto_chunk.x,

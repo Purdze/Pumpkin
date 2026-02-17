@@ -16,7 +16,7 @@ use rustc_hash::FxHashMap;
 use serde::{Deserialize, Serialize};
 use std::fmt::Write;
 use std::ops::{BitAnd, BitOr};
-use std::sync::atomic::AtomicBool;
+use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::{Arc, RwLock};
 use thiserror::Error;
 use tokio::sync::Mutex;
@@ -87,6 +87,7 @@ pub struct ChunkData {
     pub status: ChunkStatus,
     pub dirty: AtomicBool,
     pub network_cache: std::sync::Mutex<FxHashMap<MinecraftVersion, Arc<[u8]>>>,
+    pub section_cache: std::sync::Mutex<Box<[Option<Vec<u8>>]>>,
 }
 
 pub struct ChunkEntityData {
@@ -110,6 +111,7 @@ pub struct ChunkSections {
     pub block_sections: Box<[RwLock<BlockPalette>]>,
     pub biome_sections: Box<[RwLock<BiomePalette>]>,
     pub min_y: i32,
+    pub dirty_sections: AtomicU32,
 }
 
 impl ChunkSections {
@@ -305,6 +307,7 @@ impl ChunkSections {
             block_sections,
             biome_sections,
             min_y,
+            dirty_sections: AtomicU32::new(u32::MAX),
         }
     }
 
@@ -413,6 +416,8 @@ impl ChunkSections {
         let section_index = relative_y / BlockPalette::SIZE;
         let relative_y = relative_y % BlockPalette::SIZE;
         if let Some(section) = self.block_sections.get(section_index) {
+            self.dirty_sections
+                .fetch_or(1 << section_index, Ordering::Relaxed);
             return section.write().unwrap().set(
                 relative_x,
                 relative_y,
@@ -436,6 +441,8 @@ impl ChunkSections {
         let section_index = relative_y / BiomePalette::SIZE;
         let relative_y = relative_y % BiomePalette::SIZE;
         if let Some(section) = self.biome_sections.get(section_index) {
+            self.dirty_sections
+                .fetch_or(1 << section_index, Ordering::Relaxed);
             section
                 .write()
                 .unwrap()

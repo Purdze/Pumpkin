@@ -10,6 +10,7 @@ use pumpkin_util::version::MinecraftVersion;
 use pumpkin_world::chunk::format::LightContainer;
 use pumpkin_world::chunk::{ChunkData, palette::NetworkPalette};
 use std::io::Write;
+use std::sync::atomic::Ordering;
 
 /// Sent by the server to provide the client with the full data for a chunk.
 ///
@@ -21,7 +22,7 @@ pub struct CChunkData<'a>(pub &'a ChunkData);
 
 impl CChunkData<'_> {
     #[expect(clippy::too_many_lines)]
-    fn serialize_packet_data(&self, version: &MinecraftVersion) -> Result<Vec<u8>, WritingError> {
+    fn serialize_packet_data(&self, version: MinecraftVersion) -> Result<Vec<u8>, WritingError> {
         let mut buf = Vec::with_capacity(49152);
 
         // Chunk X
@@ -47,15 +48,37 @@ impl CChunkData<'_> {
         write_heightmap(&mut buf, 5, &heightmaps.motion_blocking_no_leaves)?;
 
         {
+            let needs_remap = matches!(
+                version,
+                MinecraftVersion::V_1_21_7 | MinecraftVersion::V_1_21_9
+            );
+            let dirty = self.0.section.dirty_sections.swap(0, Ordering::Relaxed);
+            let mut section_cache = self.0.section_cache.lock().unwrap();
+
+            for i in 0..section_cache.len() {
+                if (dirty & (1 << i)) != 0 {
+                    section_cache[i] = None;
+                }
+            }
+
             let mut blocks_and_biomes_buf = Vec::with_capacity(40960);
 
-            for (block_lock, biome_lock) in self
+            for (i, (block_lock, biome_lock)) in self
                 .0
                 .section
                 .block_sections
                 .iter()
                 .zip(self.0.section.biome_sections.iter())
+                .enumerate()
             {
+                if !needs_remap && let Some(cached) = section_cache.get(i).and_then(|c| c.as_ref())
+                {
+                    blocks_and_biomes_buf.write_slice(cached)?;
+                    continue;
+                }
+
+                let section_start = blocks_and_biomes_buf.len();
+
                 let block_palette = block_lock.read().unwrap();
                 let biome_palette = biome_lock.read().unwrap();
                 let non_empty_block_count = block_palette.non_air_block_count() as i16;
@@ -64,11 +87,11 @@ impl CChunkData<'_> {
                 let mut block_network = block_palette.convert_network();
                 match &mut block_network.palette {
                     NetworkPalette::Single(registry_id) => {
-                        *registry_id = remap_block_state_for_version(*registry_id, *version);
+                        *registry_id = remap_block_state_for_version(*registry_id, version);
                     }
                     NetworkPalette::Indirect(palette) => {
                         for registry_id in palette.iter_mut() {
-                            *registry_id = remap_block_state_for_version(*registry_id, *version);
+                            *registry_id = remap_block_state_for_version(*registry_id, version);
                         }
                     }
                     NetworkPalette::Direct => {
@@ -82,7 +105,7 @@ impl CChunkData<'_> {
                             for index in 0..values_per_i64 {
                                 let shift = index * bits_per_entry;
                                 let state_id = ((packed_word_u64 >> shift) & id_mask) as u16;
-                                let remapped_id = remap_block_state_for_version(state_id, *version);
+                                let remapped_id = remap_block_state_for_version(state_id, version);
                                 remapped_word |= u64::from(remapped_id) << shift;
                             }
                             *packed_word = remapped_word as i64;
@@ -141,7 +164,13 @@ impl CChunkData<'_> {
                 for packed in biome_network.packed_data {
                     blocks_and_biomes_buf.write_i64_be(packed)?;
                 }
+
+                if !needs_remap && let Some(entry) = section_cache.get_mut(i) {
+                    *entry = Some(blocks_and_biomes_buf[section_start..].to_vec());
+                }
             }
+
+            drop(section_cache);
 
             buf.write_var_int(&blocks_and_biomes_buf.len().try_into().map_err(|_| {
                 WritingError::Message(format!(
@@ -258,7 +287,7 @@ impl ClientPacket for CChunkData<'_> {
             }
         }
 
-        let serialized = self.serialize_packet_data(version)?;
+        let serialized = self.serialize_packet_data(*version)?;
         write.write_slice(&serialized)?;
 
         self.0
