@@ -23,7 +23,7 @@ use std::thread;
 use std::time::Duration;
 use tracing::{debug, error, info, trace, warn};
 
-struct TaskHeapNode(i8, NodeKey);
+struct TaskHeapNode(i8, u32, NodeKey);
 impl PartialEq for TaskHeapNode {
     fn eq(&self, other: &Self) -> bool {
         self.0 == other.0
@@ -54,6 +54,7 @@ pub struct GenerationSchedule {
     unload_chunks: HashSetType<ChunkPos>,
 
     io_lock: IOLock,
+    priority_generation: u32,
     running_task_count: u16,
     recv_chunk: crossfire::compat::MRx<(ChunkPos, RecvChunk)>,
     io_read: crossfire::compat::MTx<ChunkPos>,
@@ -131,6 +132,7 @@ impl GenerationSchedule {
                     public_chunk_map: level_sched.loaded_chunks.clone(),
                     unload_chunks: HashSetType::default(),
                     io_lock,
+                    priority_generation: 0,
                     running_task_count: 0,
                     recv_chunk,
                     io_read: send_read_io,
@@ -198,22 +200,12 @@ impl GenerationSchedule {
         *last_level.get(&pos).unwrap_or(&ChunkLoading::MAX_LEVEL) + (stage as i8)
     }
 
-    fn sort_queue(&mut self) {
-        let mut new_queue = BinaryHeap::with_capacity(self.queue.len());
-        for i in &self.queue {
-            if let Some(node) = self.graph.nodes.get(i.1) {
-                new_queue.push(TaskHeapNode(
-                    Self::calc_priority(
-                        &self.last_level,
-                        &self.last_high_priority,
-                        node.pos,
-                        node.stage,
-                    ),
-                    i.1,
-                ));
-            }
-        }
-        self.queue = new_queue;
+    fn enqueue(&mut self, node_key: NodeKey, pos: ChunkPos, stage: StagedChunkEnum) {
+        self.queue.push(TaskHeapNode(
+            Self::calc_priority(&self.last_level, &self.last_high_priority, pos, stage),
+            self.priority_generation,
+            node_key,
+        ));
     }
 
     fn resort_work(&mut self, new_data: (Option<LevelChange>, Option<Vec<ChunkPos>>)) -> bool {
@@ -226,7 +218,7 @@ impl GenerationSchedule {
             self.last_high_priority = high_priority;
         }
         let Some(new_level) = new_data.0 else {
-            self.sort_queue();
+            self.priority_generation += 1;
             return true;
         };
         // debug!("receive new level");
@@ -303,15 +295,7 @@ impl GenerationSchedule {
                                         // Ensure the implicitly created task is queued
                                         let node = self.graph.nodes.get_mut(*ano_task).unwrap();
                                         node.in_queue = true;
-                                        self.queue.push(TaskHeapNode(
-                                            Self::calc_priority(
-                                                &self.last_level,
-                                                &self.last_high_priority,
-                                                new_pos,
-                                                req_stage,
-                                            ),
-                                            *ano_task,
-                                        ));
+                                        self.enqueue(*ano_task, new_pos, req_stage);
                                     }
                                     self.graph.add_edge(*ano_task, task); // task depend on ano_task
                                     continue;
@@ -345,6 +329,7 @@ impl GenerationSchedule {
                                             new_pos,
                                             req_stage,
                                         ),
+                                        self.priority_generation,
                                         *ano_task,
                                     ));
                                 }
@@ -355,14 +340,15 @@ impl GenerationSchedule {
                     let node = self.graph.nodes.get_mut(task).unwrap();
                     if node.in_degree == 0 {
                         node.in_queue = true;
-                        self.queue.push(TaskHeapNode(0, task));
+                        self.queue
+                            .push(TaskHeapNode(0, self.priority_generation, task));
                     }
                 }
             }
             self.chunk_map.insert(pos, holder);
         }
         self.last_level = new_level.1;
-        self.sort_queue();
+        self.priority_generation += 1;
         true
     }
 
@@ -484,6 +470,7 @@ impl GenerationSchedule {
                             node.pos,
                             node.stage,
                         ),
+                        self.priority_generation,
                         cur.to,
                     ));
                     node.in_queue = true;
@@ -736,6 +723,7 @@ impl GenerationSchedule {
                                 pos,
                                 StagedChunkEnum::from(1),
                             ) - 50, // Priority boost for retry
+                            self.priority_generation,
                             first_task,
                         ));
                     }
@@ -785,14 +773,26 @@ impl GenerationSchedule {
                     break 'out2;
                 }
 
-                if self.resort_work(self.send_level.get()) {
-                    self.queue.push(task);
-                    break 'out2;
-                }
+                self.resort_work(self.send_level.get());
                 while let Ok((pos, data)) = self.recv_chunk.try_recv() {
                     self.receive_chunk(pos, data);
                 }
-                if let Some(node) = self.graph.nodes.get_mut(task.1) {
+                if task.1 < self.priority_generation {
+                    if let Some(node) = self.graph.nodes.get(task.2) {
+                        self.queue.push(TaskHeapNode(
+                            Self::calc_priority(
+                                &self.last_level,
+                                &self.last_high_priority,
+                                node.pos,
+                                node.stage,
+                            ),
+                            self.priority_generation,
+                            task.2,
+                        ));
+                    }
+                    continue;
+                }
+                if let Some(node) = self.graph.nodes.get_mut(task.2) {
                     if node.in_degree != 0 {
                         node.in_queue = false;
                         continue;
@@ -918,7 +918,7 @@ impl GenerationSchedule {
                             if level.shut_down_chunk_system.load(Relaxed) {
                                 break;
                             }
-                            thread::sleep(Duration::from_millis(50));
+                            thread::sleep(Duration::from_millis(5));
                         }
                     }
                 }
