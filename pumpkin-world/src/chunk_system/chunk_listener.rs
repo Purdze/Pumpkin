@@ -32,43 +32,41 @@ impl ChunkListener {
         rx
     }
     pub fn process_new_chunk(&self, pos: ChunkPos, chunk: &SyncChunk) {
-        {
+        let matching_singles: Vec<_> = {
             let mut single = self.single.lock().unwrap();
             let mut i = 0;
-            let mut len = single.len();
-            while i < len {
+            let mut extracted = Vec::new();
+            while i < single.len() {
                 if single[i].0 == pos {
                     let (_, send) = single.remove(i);
-                    let _ = send.send(chunk.clone());
-                    // log::debug!("single listener {i} send {pos:?}");
-                    len -= 1;
+                    extracted.push(send);
                     continue;
                 }
                 if single[i].1.is_closed() {
-                    // let listener_pos = single[i].0;
                     single.remove(i);
-                    // log::debug!("single listener dropped {listener_pos:?}");
-                    len -= 1;
                     continue;
                 }
                 i += 1;
+            }
+            extracted
+        };
+        for send in matching_singles {
+            let _ = send.send(chunk.clone());
+        }
+
+        let global_senders: Vec<_> = {
+            let global = self.global.lock().unwrap();
+            global.clone()
+        };
+        let mut any_failed = false;
+        for sender in &global_senders {
+            if sender.send((pos, chunk.clone())).is_err() {
+                any_failed = true;
             }
         }
-        {
+        if any_failed {
             let mut global = self.global.lock().unwrap();
-            let mut i = 0;
-            let mut len = global.len();
-            while i < len {
-                if matches!(global[i].send((pos, chunk.clone())), Ok(())) {
-                    // log::debug!("global listener {i} send {pos:?}");
-                } else {
-                    // log::debug!("one global listener dropped");
-                    global.remove(i);
-                    len -= 1;
-                    continue;
-                }
-                i += 1;
-            }
+            global.retain(|s| !s.is_empty());
         }
     }
 }

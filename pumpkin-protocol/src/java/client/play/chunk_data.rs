@@ -22,7 +22,7 @@ pub struct CChunkData<'a>(pub &'a ChunkData);
 impl CChunkData<'_> {
     #[expect(clippy::too_many_lines)]
     fn serialize_packet_data(&self, version: &MinecraftVersion) -> Result<Vec<u8>, WritingError> {
-        let mut buf = Vec::new();
+        let mut buf = Vec::with_capacity(49152);
 
         // Chunk X
         buf.write_i32_be(self.0.x)?;
@@ -47,7 +47,7 @@ impl CChunkData<'_> {
         write_heightmap(&mut buf, 5, &heightmaps.motion_blocking_no_leaves)?;
 
         {
-            let mut blocks_and_biomes_buf = Vec::new();
+            let mut blocks_and_biomes_buf = Vec::with_capacity(40960);
 
             for (block_lock, biome_lock) in self
                 .0

@@ -208,7 +208,7 @@ impl Level {
         let entity_threads = (threads_per_dimension / 2).max(1);
 
         GenerationSchedule::create(
-            2,
+            4,
             threads_per_dimension,
             level_ref.clone(),
             level_channel,
