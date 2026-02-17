@@ -195,7 +195,7 @@ impl Chunk {
                 light_populated: AtomicBool::new(false),
                 status: ChunkStatus::Empty,
                 dirty: AtomicBool::new(false),
-                network_cache: std::sync::Mutex::new(None),
+                network_cache: Default::default(),
             })),
         ) {
             Chunk::Proto(proto) => proto,
@@ -266,7 +266,7 @@ impl Chunk {
             fluid_ticks: Default::default(),
             block_entities: Default::default(),
             status: proto_chunk.stage.into(),
-            network_cache: std::sync::Mutex::new(None),
+            network_cache: Default::default(),
         };
 
         chunk.heightmap = Mutex::new(chunk.calculate_heightmap());

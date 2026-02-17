@@ -72,7 +72,7 @@ impl Dirtiable for ChunkData {
         self.dirty.store(flag, Ordering::Relaxed);
 
         if flag {
-            *self.network_cache.lock().unwrap() = None;
+            self.network_cache.lock().unwrap().clear();
             return;
         }
 
@@ -189,7 +189,7 @@ impl ChunkData {
             light_engine: std::sync::Mutex::new(light_engine),
             light_populated: AtomicBool::new(chunk_data.light_correct),
             status: chunk_data.status,
-            network_cache: std::sync::Mutex::new(None),
+            network_cache: Default::default(),
         })
     }
 

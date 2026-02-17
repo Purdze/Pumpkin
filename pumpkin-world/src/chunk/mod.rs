@@ -86,7 +86,7 @@ pub struct ChunkData {
     pub light_populated: AtomicBool,
     pub status: ChunkStatus,
     pub dirty: AtomicBool,
-    pub network_cache: std::sync::Mutex<Option<(MinecraftVersion, Box<[u8]>)>>,
+    pub network_cache: std::sync::Mutex<FxHashMap<MinecraftVersion, Arc<[u8]>>>,
 }
 
 pub struct ChunkEntityData {

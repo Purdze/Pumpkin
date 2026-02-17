@@ -1,5 +1,5 @@
 /// Represents a specific version of the Minecraft Java Edition protocol.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[allow(non_camel_case_types)]
 pub enum MinecraftVersion {
     /// 1.7.2: The Update That Changed The World

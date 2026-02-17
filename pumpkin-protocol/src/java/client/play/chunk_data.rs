@@ -252,19 +252,20 @@ impl ClientPacket for CChunkData<'_> {
 
         {
             let cache = self.0.network_cache.lock().unwrap();
-            if let Some((cached_version, cached_bytes)) = cache.as_ref() {
-                if cached_version == version {
-                    write.write_slice(cached_bytes)?;
-                    return Ok(());
-                }
+            if let Some(cached_bytes) = cache.get(version) {
+                write.write_slice(cached_bytes)?;
+                return Ok(());
             }
         }
 
         let serialized = self.serialize_packet_data(version)?;
         write.write_slice(&serialized)?;
 
-        let mut cache = self.0.network_cache.lock().unwrap();
-        *cache = Some((*version, serialized.into_boxed_slice()));
+        self.0
+            .network_cache
+            .lock()
+            .unwrap()
+            .insert(*version, serialized.into());
 
         Ok(())
     }
